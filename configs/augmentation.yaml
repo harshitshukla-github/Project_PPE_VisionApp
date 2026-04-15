@@ -1,0 +1,84 @@
+# ============================================================================
+# PPB Vision Module — Albumentations Augmentation Pipeline
+#
+# Simulates real construction-site conditions: variable lighting, weather,
+# dust, and motion blur from handheld phones.
+#
+# Applied during training via ultralytics' albumentations integration
+# (auto-enabled when the `albumentations` package is installed).
+# These transforms are applied AFTER ultralytics' built-in mosaic/mixup.
+# ============================================================================
+
+train_augmentations:
+
+  # --- Lighting & Contrast ---
+  - RandomBrightnessContrast:
+      brightness_limit: 0.2
+      contrast_limit: 0.2
+      p: 0.5
+
+  - CLAHE:
+      clip_limit: 4.0
+      tile_grid_size: [8, 8]
+      p: 0.3
+
+  # --- Blur & Motion (handheld phone cameras) ---
+  - GaussianBlur:
+      blur_limit: [3, 7]
+      p: 0.3
+
+  - MotionBlur:
+      blur_limit: 7
+      p: 0.2
+
+  # --- Weather Simulation (outdoor construction sites) ---
+  - RandomRain:
+      slant_lower: -10
+      slant_upper: 10
+      drop_length: 20
+      drop_width: 1
+      drop_color: [200, 200, 200]
+      blur_value: 2
+      brightness_coefficient: 0.9
+      rain_type: null
+      p: 0.10
+
+  - RandomFog:
+      fog_coef_lower: 0.1
+      fog_coef_upper: 0.3
+      alpha_coef: 0.08
+      p: 0.10
+
+  - RandomSunFlare:
+      flare_roi: [0, 0, 1, 0.5]
+      angle_lower: 0
+      angle_upper: 1
+      num_flare_circles_lower: 6
+      num_flare_circles_upper: 10
+      src_radius: 400
+      src_color: [255, 255, 255]
+      p: 0.05
+
+  # --- Noise ---
+  - GaussNoise:
+      var_limit: [10.0, 50.0]
+      mean: 0
+      p: 0.2
+
+  # --- Geometric (handled mostly by ultralytics built-in, but augmented here) ---
+  - ImageCompression:
+      quality_lower: 70
+      quality_upper: 100
+      p: 0.2
+
+# ============================================================================
+# Reference — ultralytics built-in augmentation params (set in *_train.yaml)
+# These are controlled via the training YAML, not albumentations:
+#   hsv_h, hsv_s, hsv_v   → hue/saturation/value jitter
+#   degrees               → rotation
+#   translate             → translation
+#   scale                 → scale jitter
+#   fliplr                → horizontal flip
+#   mosaic                → mosaic augmentation
+#   mixup                 → mixup augmentation
+# ============================================================================

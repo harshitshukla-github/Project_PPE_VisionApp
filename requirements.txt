@@ -1,0 +1,87 @@
+# ============================================================================
+# PPB Vision Module - requirements.txt
+# Personal Protective Equipment (PPE) Compliance Verification System
+# Environment: uv (https://docs.astral.sh/uv/)
+# Python: >=3.10, <3.13
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# CORE: Ultralytics (ships YOLO26 + YOLO11 + all prior versions)
+# Both YOLO26 and YOLO11 are accessible via the same `ultralytics` package.
+# Model selection happens at runtime: YOLO("yolo26l.pt") vs YOLO("yolo11l.pt")
+# ---------------------------------------------------------------------------
+ultralytics>=8.4.0
+
+# ---------------------------------------------------------------------------
+# DEEP LEARNING BACKEND
+# PyTorch is pulled in by ultralytics, but we pin CUDA 12.x compatible builds.
+# For CPU-only dev machines, uv will resolve the CPU wheel automatically.
+# ---------------------------------------------------------------------------
+torch>=2.2.0
+torchvision>=0.17.0
+
+# ---------------------------------------------------------------------------
+# COMPUTER VISION & IMAGE PROCESSING
+# ---------------------------------------------------------------------------
+opencv-python-headless>=4.9.0    # headless for server / CI (no GUI deps)
+Pillow>=10.2.0                    # image I/O, augmentation helpers
+albumentations>=1.4.0             # advanced training augmentations
+
+# ---------------------------------------------------------------------------
+# DATASET MANAGEMENT & ANNOTATION
+# ---------------------------------------------------------------------------
+roboflow>=1.1.0                   # download PPE datasets from Roboflow Universe
+kaggle>=1.6.0                     # download PPE datasets from Kaggle
+supervision>=0.21.0               # bbox/mask visualization, dataset utilities
+pycocotools>=2.0.7                # COCO evaluation metrics
+
+# ---------------------------------------------------------------------------
+# EXPERIMENT TRACKING & VISUALIZATION
+# ---------------------------------------------------------------------------
+mlflow>=2.12.0                    # experiment tracking, model registry
+tensorboard>=2.16.0               # training curve visualization
+matplotlib>=3.8.0                 # custom plots (confusion matrix, PR curves)
+seaborn>=0.13.0                   # statistical plots
+
+# ---------------------------------------------------------------------------
+# MODEL EXPORT & OPTIMIZATION (for production deployment)
+# ---------------------------------------------------------------------------
+onnx>=1.16.0                      # ONNX export for cross-platform inference
+onnxruntime>=1.17.0               # ONNX CPU inference runtime
+# onnxruntime-gpu>=1.17.0         # uncomment for GPU inference via ONNX
+
+# ---------------------------------------------------------------------------
+# FASTAPI SERVING (vision microservice - will be the inference API)
+# ---------------------------------------------------------------------------
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9           # file upload handling in FastAPI
+
+# ---------------------------------------------------------------------------
+# GOOGLE GEMINI (hybrid pipeline - human-readable explanations)
+# ---------------------------------------------------------------------------
+google-genai>=1.0.0               # new unified Gemini SDK
+
+# ---------------------------------------------------------------------------
+# CONFIGURATION & UTILITIES
+# ---------------------------------------------------------------------------
+pydantic>=2.7.0                   # config validation, API schemas
+pydantic-settings>=2.2.0          # .env based settings management
+python-dotenv>=1.0.0              # environment variable loading
+PyYAML>=6.0.1                     # YOLO dataset YAML configs
+rich>=13.7.0                      # pretty terminal output / progress bars
+typer>=0.12.0                     # CLI interface for train/eval/export commands
+loguru>=0.7.0                     # structured logging
+
+# ---------------------------------------------------------------------------
+# TESTING & CODE QUALITY
+# ---------------------------------------------------------------------------
+pytest>=8.1.0
+pytest-cov>=5.0.0
+ruff>=0.4.0                       # linting + formatting (replaces black/isort)
+
+# ---------------------------------------------------------------------------
+# JUPYTER / INTERACTIVE DEVELOPMENT (optional - for EDA & prototyping)
+# ---------------------------------------------------------------------------
+jupyterlab>=4.1.0
+ipywidgets>=8.1.0

@@ -1,0 +1,29 @@
+# ============================================================================
+# PPB Vision Module — YOLO Dataset Configuration
+# Used by both YOLO26 and YOLO11 training runs.
+# ============================================================================
+
+# Root path (relative to project root or absolute)
+path: data/splits
+
+train: train/images
+val:   val/images
+test:  test/images
+
+# Number of classes
+nc: 12
+
+# Class names — must match class IDs in all annotation .txt files
+names:
+  0:  hardhat
+  1:  no_hardhat
+  2:  safety_vest
+  3:  no_vest
+  4:  goggles
+  5:  mask
+  6:  gloves
+  7:  boots
+  8:  ear_protection
+  9:  face_shield
+  10: harness
+  11: person

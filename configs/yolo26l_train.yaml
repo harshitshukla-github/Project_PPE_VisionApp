@@ -1,0 +1,48 @@
+# ============================================================================
+# PPB Vision Module — YOLO26-L Training Hyperparameters
+#
+# Production backend candidate: highest accuracy, GPU inference.
+# Architecture note: YOLO26 is NMS-free (end-to-end), DFL removed.
+#   → dfl is set to 0.0 (no DFL loss component).
+#   → YOLO26 uses MuSGD (SGD + Muon hybrid) internally — ultralytics
+#     selects the correct optimizer when loading a yolo26*.pt checkpoint.
+#
+# Tuned for: single GPU with ≥8 GB VRAM (T4 / RTX 3080 / A10G)
+# ============================================================================
+
+# --- Core ---
+epochs: 100
+imgsz: 640
+batch: 8          # L model is VRAM-heavy; reduce to 4 on 8 GB GPUs if OOM
+patience: 20      # early stopping — stop if no improvement for 20 epochs
+
+# --- Optimizer ---
+optimizer: SGD    # ultralytics will use MuSGD internally for YOLO26
+lr0: 0.01         # initial learning rate
+lrf: 0.01         # final lr = lr0 * lrf (cosine decay)
+momentum: 0.937
+weight_decay: 0.0005
+
+# --- Warmup ---
+warmup_epochs: 3.0
+warmup_momentum: 0.8
+
+# --- Loss weights ---
+box: 7.5
+cls: 0.5
+dfl: 0.0          # DFL removed in YOLO26 architecture
+
+# --- Built-in ultralytics augmentation ---
+hsv_h: 0.015      # hue jitter
+hsv_s: 0.7        # saturation jitter
+hsv_v: 0.4        # value (brightness) jitter
+degrees: 10.0     # rotation ±10°
+translate: 0.1    # translation ±10%
+scale: 0.5        # scale jitter [1-scale, 1+scale]
+fliplr: 0.5       # horizontal flip probability
+mosaic: 1.0       # mosaic augmentation (4-image grid)
+mixup: 0.15       # mixup probability
+
+# --- Misc ---
+pretrained: true  # start from COCO pretrained yolo26l.pt
+exist_ok: false   # fail if run dir already exists (prevents accidental overwrites)

@@ -1,0 +1,134 @@
+# ============================================================================
+# PPB Vision Module — Class Remapping Configuration
+#
+# For each dataset source, maps source class names → our target class IDs.
+# Use null to DISCARD a class (annotation lines for that class are removed).
+#
+# Our 12-class target schema:
+#   0: hardhat        1: no_hardhat     2: safety_vest    3: no_vest
+#   4: goggles        5: mask           6: gloves         7: boots
+#   8: ear_protection 9: face_shield   10: harness       11: person
+# ============================================================================
+
+datasets:
+
+  # --------------------------------------------------------------------------
+  # Dataset 1: PPE Combined Model v8
+  # Source: roboflow-universe-projects / personal-protective-equipment-combined-model
+  # Images: ~44,000 | Source classes: 14
+  # --------------------------------------------------------------------------
+  ppe_combined:
+    Hardhat:        0   # → hardhat
+    NO-Hardhat:     1   # → no_hardhat
+    Safety Vest:    2   # → safety_vest
+    NO-Safety Vest: 3   # → no_vest
+    Goggles:        4   # → goggles
+    Mask:           5   # → mask
+    Gloves:         6   # → gloves
+    Person:         11  # → person
+    # Discarded classes (no equivalent in our schema):
+    NO-Goggles:     null
+    NO-Mask:        null
+    NO-Gloves:      null
+    Ladder:         null
+    Fall-Detected:  null
+    Safety Cone:    null
+
+  # --------------------------------------------------------------------------
+  # Dataset 2: PPE Annotation v7
+  # Source: ppe-detection-4ewkm / ppe-annotation
+  # Images: ~10,129 | Source classes: TBD after download
+  # NOTE: Verify class names from downloaded data.yaml and update this map.
+  # --------------------------------------------------------------------------
+  ppe_annotation:
+    helmet:         0   # → hardhat
+    hardhat:        0   # → hardhat
+    Helmet:         0
+    Hardhat:        0
+    no helmet:      1   # → no_hardhat
+    no-helmet:      1
+    No Helmet:      1
+    vest:           2   # → safety_vest
+    safety vest:    2
+    Safety Vest:    2
+    no vest:        3   # → no_vest
+    No Vest:        3
+    goggles:        4   # → goggles
+    Goggles:        4
+    safety glasses: 4
+    mask:           5   # → mask
+    Mask:           5
+    face mask:      5
+    gloves:         6   # → gloves
+    Gloves:         6
+    boots:          7   # → boots
+    Boots:          7
+    ear protection: 8   # → ear_protection
+    earmuffs:       8
+    face shield:    9   # → face_shield
+    Face Shield:    9
+    harness:        10  # → harness
+    Harness:        10
+    person:         11  # → person
+    Person:         11
+    worker:         11
+
+  # --------------------------------------------------------------------------
+  # Dataset 3: Construction Site Safety
+  # Source: roboflow-universe-projects / construction-site-safety
+  # Images: ~2,801 | Source classes: ~10
+  # --------------------------------------------------------------------------
+  construction_safety:
+    Hardhat:         0   # → hardhat
+    hardhat:         0
+    Hard Hat:        0
+    NO-Hardhat:      1   # → no_hardhat
+    NO-Hard Hat:     1
+    Safety Vest:     2   # → safety_vest
+    safety vest:     2
+    NO-Safety Vest:  3   # → no_vest
+    Mask:            5   # → mask
+    mask:            5
+    Person:          11  # → person
+    person:          11
+    # Discarded:
+    NO-Mask:         null
+    Safety Cone:     null
+    Machinery:       null
+    Vehicle:         null
+    cone:            null
+
+  # --------------------------------------------------------------------------
+  # Dataset 4: Kaggle — Safety Helmet & Reflective Jacket
+  # Source: configured via KAGGLE_PPE_DATASET env var
+  # Images: ~5,000 | Source classes: helmet, no-helmet, vest, no-vest, person
+  # NOTE: After downloading, open data/raw/kaggle_ppe/data.yaml and verify
+  #       the exact source class names match the keys here. Update if needed.
+  # --------------------------------------------------------------------------
+  kaggle_ppe:
+    helmet:              0   # → hardhat
+    Helmet:              0
+    hard hat:            0
+    Hard Hat:            0
+    hardhat:             0
+    Hardhat:             0
+    no helmet:           1   # → no_hardhat
+    no-helmet:           1
+    No Helmet:           1
+    NO-Helmet:           1
+    without helmet:      1
+    vest:                2   # → safety_vest
+    Vest:                2
+    reflective jacket:   2
+    Reflective Jacket:   2
+    safety vest:         2
+    Safety Vest:         2
+    no vest:             3   # → no_vest
+    no-vest:             3
+    No Vest:             3
+    NO-Vest:             3
+    without vest:        3
+    person:              11  # → person
+    Person:              11
+    worker:              11
+    Worker:              11

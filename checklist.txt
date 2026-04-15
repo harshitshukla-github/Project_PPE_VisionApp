@@ -1,0 +1,169 @@
+PPB Vision Module — Build Checklist
+=====================================
+Generated: 2026-04-08
+Blueprint: agents.md
+Current Phase: P1 — Dual YOLO Training
+
+Legend: [x] Done  [ ] Pending  [-] Not started yet (future phase)
+
+===========================================================================
+PHASE 0 — STACK SELECTION & ARCHITECTURE               ✅ COMPLETE
+===========================================================================
+[x] agents.md — project blueprint / single source of truth
+[x] requirements.txt — all Python dependencies
+[x] pyproject.toml — uv project config
+[x] .env.example — env variable template with all required keys
+[x] .gitignore
+[x] Python virtual environment (.venv via uv)
+
+===========================================================================
+PHASE 1 — DATA PIPELINE (Step-I: Data Gathering)       🔄 IN PROGRESS
+===========================================================================
+
+--- Config Files ---
+[x] configs/data.yaml           — YOLO dataset config (12 classes, split paths)
+[x] configs/class_maps.yaml     — remapping rules for all 4 dataset sources
+[x] configs/augmentation.yaml   — albumentations pipeline config
+[x] configs/yolo26l_train.yaml  — YOLO26-L hyperparameters (batch=8, dfl=0.0)
+[x] configs/yolo26n_train.yaml  — YOLO26-N hyperparameters (batch=32, dfl=0.0)
+[x] configs/yolo11l_train.yaml  — YOLO11-L hyperparameters (batch=8, dfl=1.5)
+[x] configs/yolo11n_train.yaml  — YOLO11-N hyperparameters (batch=32, dfl=1.5)
+
+--- src/settings.py ---
+[x] src/settings.py             — Pydantic Settings (env vars + config loading)
+
+--- src/data/ — Dataset Management ---
+[x] src/data/__init__.py
+[x] src/data/downloader.py      — Roboflow API + Kaggle dataset download
+[x] src/data/remapper.py        — Unify class labels → 12-class schema
+[x] src/data/splitter.py        — Train (80%) / Val (10%) / Test (10%) split
+[x] src/data/validator.py       — Annotation integrity checks (YOLO format)
+
+--- Actual Data (gitignored) ---
+[ ] data/raw/ppe_combined/      — Roboflow PPE Combined Model v8 (~44k images)
+[ ] data/raw/ppe_annotation/    — Roboflow PPE Annotation v7 (~10k images)
+[ ] data/raw/construction_safety/ — Roboflow Construction Site Safety (~2.8k)
+[ ] data/raw/kaggle_ppe/        — Kaggle Safety Helmet & Reflective Jacket (~5k)
+[ ] data/processed/             — After remapping + cleaning
+[ ] data/splits/train/          — 80% split (images + labels)
+[ ] data/splits/val/            — 10% split
+[ ] data/splits/test/           — 10% split
+
+===========================================================================
+PHASE 1 — TRAINING PIPELINE                            🔄 IN PROGRESS
+===========================================================================
+
+--- src/training/ ---
+[x] src/training/__init__.py
+[x] src/training/hyperparams.py  — TrainingConfig Pydantic model + YAML loader
+[x] src/training/callbacks.py    — Loguru progress callbacks + MLflow callbacks
+[x] src/training/trainer.py      — Unified trainer: train(model_name) → models/*.pt
+
+--- Training Runs (gitignored) ---
+[ ] Train yolo26l (100 epochs, imgsz=640) → runs/yolo26l_ppe/
+[ ] Train yolo11l (100 epochs, imgsz=640) → runs/yolo11l_ppe/
+[ ] Train yolo26n (100 epochs, imgsz=640) → runs/yolo26n_ppe/
+[ ] Train yolo11n (100 epochs, imgsz=640) → runs/yolo11n_ppe/
+
+--- Model Weights (gitignored) ---
+[ ] models/yolo26l_ppe_best.pt
+[ ] models/yolo26n_ppe_best.pt
+[ ] models/yolo11l_ppe_best.pt
+[ ] models/yolo11n_ppe_best.pt
+
+===========================================================================
+PHASE 1 — EVALUATION & BENCHMARKING                   ⬜ NOT STARTED
+===========================================================================
+
+--- src/evaluation/ ---
+[ ] src/evaluation/__init__.py
+[ ] src/evaluation/benchmark.py  — Compare YOLO26 vs YOLO11 (mAP, latency, size)
+[ ] src/evaluation/visualize.py  — Confusion matrix, PR curves, side-by-side
+[ ] src/evaluation/report.py     — Auto-generate markdown benchmark report
+
+--- Deliverable ---
+[ ] runs/benchmark_report.md     — YOLO26 vs YOLO11 final comparison
+[ ] Production model selected (YOLO26-L or YOLO11-L)
+
+===========================================================================
+PHASE 1 — CLI                                          🔄 IN PROGRESS
+===========================================================================
+[x] cli.py                       — Typer CLI (rich panels, enum validation)
+    [x] data download [-d <key>]     — pull datasets (Roboflow + Kaggle)
+    [x] data remap   [-d <key>]      — unify class labels
+    [x] data split   [--train --val] — 80/10/10 split
+    [x] data validate [--strict]     — annotation integrity check
+    [x] data pipeline                — runs all 4 stages in sequence
+    [x] train --model <variant>      — full training (epochs/batch/mlflow overrides)
+    [x] info                         — project config + pipeline status table
+    [x] benchmark   (stub — Phase 1) — shows workaround until evaluation built
+    [x] export      (stub — Phase 1) — shows workaround until export built
+    [x] serve       (stub — Phase 2) — placeholder until FastAPI built
+[ ] main.py                      — Entry point (currently empty)
+
+===========================================================================
+PHASE 2 — INFERENCE SERVER                             ⬜ NOT STARTED
+===========================================================================
+
+--- src/inference/ ---
+[ ] src/inference/__init__.py
+[ ] src/inference/schemas.py         — Pydantic request/response models
+[ ] src/inference/detector.py        — Core detection class (model-agnostic)
+[ ] src/inference/compliance.py      — PPE checklist verification + PASS/FAIL logic
+[ ] src/inference/gemini_explainer.py — Gemini 2.5 Flash integration (FAIL only)
+
+--- src/api/ ---
+[ ] src/api/__init__.py
+[ ] src/api/deps.py              — Model loading, dependency injection
+[ ] src/api/middleware.py        — CORS, rate limiting, loguru logging
+[ ] src/api/routes.py            — /detect, /compliance/check, /health, /model/info
+[ ] src/api/main.py              — FastAPI app entry point
+
+--- src/export/ ---
+[ ] src/export/__init__.py
+[ ] src/export/onnx_export.py    — Export .pt → ONNX
+[ ] src/export/quantize.py       — FP16 / INT8 quantization
+
+===========================================================================
+PHASE 2 — TESTS                                        ⬜ NOT STARTED
+===========================================================================
+[ ] tests/conftest.py            — Fixtures: sample images, mock models
+[ ] tests/test_detector.py       — Unit tests for detector.py
+[ ] tests/test_compliance.py     — Unit tests for compliance.py
+[ ] tests/test_api.py            — Integration tests for API endpoints
+[ ] 80% pytest coverage on src/ achieved
+
+===========================================================================
+PHASE 2 — NOTEBOOKS                                    ⬜ NOT STARTED
+===========================================================================
+[ ] notebooks/01_dataset_exploration.ipynb
+[ ] notebooks/02_training_yolo26.ipynb
+[ ] notebooks/03_training_yolo11.ipynb
+[ ] notebooks/04_benchmark_comparison.ipynb
+[ ] notebooks/05_gemini_hybrid_test.ipynb
+
+===========================================================================
+PHASE 3-8 — FUTURE PHASES                             ⬜ NOT STARTED
+===========================================================================
+[-] P3: React Native mobile app (camera + upload)
+[-] P4: Gemini hybrid explanations (full integration + caching)
+[-] P5: Job PPE Matrix + admin panel (Next.js)
+[-] P6: PostgreSQL + GCP Storage integration
+[-] P7: Firebase Auth + worker identity
+[-] P8: Live video mode
+
+===========================================================================
+NEXT IMMEDIATE STEPS
+===========================================================================
+1. Run downloader.py to pull all 4 datasets (need ROBOFLOW_API_KEY in .env)
+     uv run python -m src.data.downloader
+2. Run remapper.py → remap all downloaded datasets to 12-class schema
+     uv run python -m src.data.remapper
+3. Run validator.py → verify annotation integrity
+     uv run python -m src.data.validator
+4. Run splitter.py → produce data/splits/ (train/val/test)
+     uv run python -m src.data.splitter
+5. Kick off first training run:
+     uv run python -m src.training.trainer --model yolo26l
+     uv run python -m src.training.trainer --model yolo11l
+7. Build src/evaluation/ (benchmark, visualize, report)

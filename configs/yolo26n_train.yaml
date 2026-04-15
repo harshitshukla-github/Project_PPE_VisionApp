@@ -1,0 +1,46 @@
+# ============================================================================
+# PPB Vision Module — YOLO26-N Training Hyperparameters
+#
+# Edge / mobile candidate: fastest inference, smallest model.
+# Architecture note: YOLO26 is NMS-free (end-to-end), DFL removed.
+#   → dfl is set to 0.0 (no DFL loss component).
+#
+# Tuned for: CPU or low-VRAM GPU (2–4 GB), rapid iteration cycle.
+# ============================================================================
+
+# --- Core ---
+epochs: 100
+imgsz: 640
+batch: 32         # nano model is small — large batch improves gradient stability
+patience: 20
+
+# --- Optimizer ---
+optimizer: SGD
+lr0: 0.01
+lrf: 0.01
+momentum: 0.937
+weight_decay: 0.0005
+
+# --- Warmup ---
+warmup_epochs: 3.0
+warmup_momentum: 0.8
+
+# --- Loss weights ---
+box: 7.5
+cls: 0.5
+dfl: 0.0          # DFL removed in YOLO26 architecture
+
+# --- Built-in ultralytics augmentation ---
+hsv_h: 0.015
+hsv_s: 0.7
+hsv_v: 0.4
+degrees: 10.0
+translate: 0.1
+scale: 0.5
+fliplr: 0.5
+mosaic: 1.0
+mixup: 0.15
+
+# --- Misc ---
+pretrained: true
+exist_ok: false
