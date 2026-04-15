@@ -61,22 +61,62 @@ def _load_class_maps() -> dict[str, dict[str, int | None]]:
     return raw["datasets"]
 
 
+def _find_dataset_root(dataset_dir: Path) -> Path:
+    """Resolve the actual directory containing the dataset splits.
+
+    The Roboflow SDK sometimes creates a project-named subfolder inside
+    the download location (e.g. ``data/raw/ppe_combined/<project-slug>/``).
+    This function walks one level deep to find where ``train/`` or
+    ``valid/`` actually lives.
+
+    Args:
+        dataset_dir: The directory passed as ``location`` to the SDK.
+
+    Returns:
+        The resolved dataset root (may be ``dataset_dir`` itself, or a
+        single subdirectory inside it).
+    """
+    # Direct layout — splits are right here
+    if (dataset_dir / "train").exists() or (dataset_dir / "valid").exists():
+        return dataset_dir
+
+    # Roboflow created a project-named subfolder — find it
+    for subdir in sorted(dataset_dir.iterdir()):
+        if subdir.is_dir() and (
+            (subdir / "train").exists() or (subdir / "valid").exists()
+        ):
+            logger.debug(f"Dataset root resolved to subfolder: {subdir.name}")
+            return subdir
+
+    # Nothing found — return as-is and let the caller surface a clear error
+    return dataset_dir
+
+
 def _load_source_classes(dataset_dir: Path) -> dict[int, str]:
     """Read class names from a downloaded dataset's ``data.yaml``.
 
+    Handles the case where the Roboflow SDK places ``data.yaml`` inside a
+    project-named subdirectory rather than directly in ``dataset_dir``.
+
     Args:
-        dataset_dir: Root directory of the downloaded dataset.
+        dataset_dir: Root directory of the downloaded dataset (may contain
+            a Roboflow-created subfolder).
 
     Returns:
         Mapping of source class ID → source class name.
 
     Raises:
-        FileNotFoundError: If ``data.yaml`` is not found in the dataset dir.
+        FileNotFoundError: If ``data.yaml`` is not found in the dataset dir
+            or any immediate subdirectory.
         KeyError: If ``names`` key is missing from the YAML.
     """
-    yaml_path = dataset_dir / "data.yaml"
+    root = _find_dataset_root(dataset_dir)
+    yaml_path = root / "data.yaml"
     if not yaml_path.exists():
-        raise FileNotFoundError(f"data.yaml not found in {dataset_dir}")
+        raise FileNotFoundError(
+            f"data.yaml not found in {dataset_dir} or any immediate subdirectory.\n"
+            "  Ensure the dataset downloaded successfully before running remapper."
+        )
 
     with yaml_path.open() as f:
         data = yaml.safe_load(f)
@@ -188,6 +228,11 @@ def remap_dataset(
         logger.error(f"[{dataset_key}] No class map entry found in class_maps.yaml.")
         return {}
 
+    # Roboflow SDK may place files one folder deeper — resolve the real root
+    actual_root = _find_dataset_root(src_root)
+    if actual_root != src_root:
+        logger.debug(f"[{dataset_key}] Using dataset subfolder: {actual_root.name}")
+
     # Load source class names from the dataset's own data.yaml
     source_classes = _load_source_classes(src_root)
     id_map = _build_id_map(source_classes, class_map)
@@ -198,9 +243,10 @@ def remap_dataset(
     stats = {"images": 0, "kept": 0, "discarded": 0, "background": 0}
 
     # Walk all splits (train / valid / test) inside the dataset
+    # Use actual_root in case Roboflow created a project-named subfolder
     for split in ("train", "valid", "test"):
-        img_dir = src_root / split / "images"
-        lbl_dir = src_root / split / "labels"
+        img_dir = actual_root / split / "images"
+        lbl_dir = actual_root / split / "labels"
 
         if not img_dir.exists():
             continue
