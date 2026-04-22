@@ -141,7 +141,10 @@ def download_roboflow_dataset(cfg: DatasetConfig, output_root: Path) -> Path:
         logger.info(f"[{cfg.key}] Already downloaded at {dest} — skipping.")
         return dest
 
-    dest.mkdir(parents=True, exist_ok=True)
+    # Ensure the parent exists but do NOT pre-create dest itself.
+    # Pre-creating dest (even as empty) causes the Roboflow SDK to treat it as
+    # an existing download and skip the transfer when overwrite=False.
+    output_root.mkdir(parents=True, exist_ok=True)
     logger.info(f"[{cfg.key}] Downloading: {cfg.description}")
     logger.info(f"[{cfg.key}] → {cfg.workspace}/{cfg.project} version {cfg.version}")
 
@@ -151,7 +154,7 @@ def download_roboflow_dataset(cfg: DatasetConfig, output_root: Path) -> Path:
         dataset = project.version(cfg.version).download(
             model_format="yolov8",
             location=str(dest),
-            overwrite=False,
+            overwrite=True,  # safe — our own check above already confirmed dest is empty
         )
         logger.success(f"[{cfg.key}] Saved to: {dataset.location}")
         return Path(dataset.location)
@@ -207,6 +210,7 @@ def download_kaggle_dataset(cfg: KaggleDatasetConfig, output_root: Path) -> Path
         logger.info(f"[{cfg.key}] Already downloaded at {dest} — skipping.")
         return dest
 
+    output_root.mkdir(parents=True, exist_ok=True)
     dest.mkdir(parents=True, exist_ok=True)
     logger.info(f"[{cfg.key}] Downloading Kaggle dataset: {cfg.description}")
     logger.info(f"[{cfg.key}] → kaggle.com/datasets/{cfg.identifier}")

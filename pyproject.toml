@@ -4,4 +4,6 @@ version = "0.1.0"
 description = "PPB Vision Module — AI-powered PPE compliance detection using dual YOLO pipeline"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
-dependencies = []
+dependencies = [
+    "kaggle>=1.7.4.5",
+]

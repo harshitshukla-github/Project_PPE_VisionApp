@@ -262,9 +262,22 @@ def data_pipeline(
     from src.data.splitter import run_split
     from src.data.validator import run_validation
 
+    downloaded: dict = {}
+
+    def _download() -> None:
+        nonlocal downloaded
+        downloaded = download_all()
+
+    def _remap() -> None:
+        keys = list(downloaded.keys())
+        if not keys:
+            console.print("[yellow]No datasets downloaded — skipping remap.[/]")
+            return
+        remap_all(dataset_keys=keys)
+
     stages = [
-        ("Download", lambda: download_all()),
-        ("Remap", lambda: remap_all()),
+        ("Download", _download),
+        ("Remap", _remap),
         ("Split", lambda: run_split()),
         ("Validate", lambda: run_validation(strict=strict)),
     ]
