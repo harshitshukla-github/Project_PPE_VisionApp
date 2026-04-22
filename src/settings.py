@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     ppb_model_name: str = Field("yolo26l", alias="PPB_MODEL_NAME")
     ppb_confidence_threshold: float = Field(0.45, alias="PPB_CONFIDENCE_THRESHOLD")
     ppb_iou_threshold: float = Field(0.50, alias="PPB_IOU_THRESHOLD")
-    ppb_device: str = Field("0", alias="PPB_DEVICE")
+    ppb_device: str = Field("cpu", alias="PPB_DEVICE")
     ppb_img_size: int = Field(640, alias="PPB_IMG_SIZE")
 
     # Tracking
