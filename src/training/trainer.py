@@ -25,9 +25,33 @@ Usage — CLI::
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
+
+# ── Windows virtual-address-space fragmentation mitigation ───────────────────
+# Must happen before torch / CUDA is first imported anywhere in the process.
+# CUDA's default allocator reserves one large contiguous VA region; on Windows
+# that fragments the process VA space so badly that even a 1.2 MB cv2 buffer
+# allocation fails with OutOfMemoryError despite plenty of physical RAM.
+#
+#   PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+#       → allocator grows in small expandable segments instead of one giant slab
+#   OMP_NUM_THREADS=1
+#       → caps OpenMP thread-pool VA consumption (each thread reserves a stack)
+#
+# setdefault() is used so an explicit env var from the shell always wins.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+# Defer CUDA kernel/module loading until first use — reduces upfront VA mapping
+# that fragments the process address space on Windows.
+os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
+# MLflow ≥2.x dropped the filesystem backend by default.  Ultralytics registers
+# its own MLflow callback which fires even when use_mlflow=False.  Point to a
+# local SQLite DB so the callback has a valid store without needing a server.
+# An explicit MLFLOW_TRACKING_URI in .env / the shell always takes precedence.
+os.environ.setdefault("MLFLOW_TRACKING_URI", "sqlite:///runs/mlflow.db")
 
 from loguru import logger
 
@@ -165,6 +189,17 @@ def train(
     logger.info(f"Training {model_name} | config={cfg_path.name} | device={active_device}")
 
     # --- Load model ---
+    # Disable cv2's internal thread pool before CUDA/YOLO initialises.
+    # Each cv2 worker thread reserves its own stack in the VA space; on Windows
+    # this compounds CUDA's VA reservation and causes OutOfMemoryError on even
+    # small image allocations (e.g. 640×640×3 = 1.2 MB).
+    try:
+        import cv2  # noqa: PLC0415
+        cv2.setNumThreads(0)
+        logger.debug("cv2 thread pool disabled (Windows VA fragmentation mitigation)")
+    except ImportError:
+        pass
+
     try:
         from ultralytics import YOLO  # noqa: PLC0415
     except ImportError as exc:

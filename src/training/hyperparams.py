@@ -15,6 +15,7 @@ Usage::
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -80,6 +81,16 @@ class TrainingConfig(BaseModel):
     fliplr: float = Field(0.5, ge=0.0, le=1.0, description="Horizontal flip probability.")
     mosaic: float = Field(1.0, ge=0.0, le=1.0, description="Mosaic augmentation probability.")
     mixup: float = Field(0.0, ge=0.0, le=1.0, description="Mixup augmentation probability.")
+
+    # --- Dataloader ---
+    # Windows paging-file exhaustion (WinError 1455) occurs when multiple worker
+    # processes each load cublas64_12.dll. Default to 0 on Windows (single-process
+    # loading) and 8 on Linux/Mac where fork-based workers are safe.
+    workers: int = Field(
+        default_factory=lambda: 0 if sys.platform == "win32" else 8,
+        ge=0,
+        description="DataLoader worker processes. Forced to 0 on Windows to avoid cublas DLL OOM.",
+    )
 
     # --- Run settings ---
     pretrained: bool = Field(True, description="Initialize from COCO pretrained weights.")

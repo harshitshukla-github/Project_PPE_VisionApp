@@ -44,3 +44,4 @@ mixup: 0.15
 # --- Misc ---
 pretrained: true
 exist_ok: false
+workers: 0        # avoids WinError 1455 paging file error on Windows

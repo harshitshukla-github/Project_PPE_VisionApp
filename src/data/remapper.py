@@ -15,6 +15,7 @@ Usage::
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -23,6 +24,28 @@ import yaml
 from loguru import logger
 
 from src.settings import settings
+
+
+# ---------------------------------------------------------------------------
+# Windows MAX_PATH workaround
+# ---------------------------------------------------------------------------
+
+def _safe(path: Path) -> str:
+    """Return an extended-length path string on Windows to bypass MAX_PATH (260 chars).
+
+    Roboflow dataset filenames can exceed 260 characters. Prefixing the
+    resolved absolute path with ``\\\\?\\`` tells the Windows API to skip
+    the length limit.  On other platforms the plain string is returned.
+
+    Args:
+        path: Absolute or relative path to convert.
+
+    Returns:
+        Path string safe for use in ``open()``, ``shutil``, and ``os`` calls.
+    """
+    if sys.platform == "win32":
+        return "\\\\?\\" + str(path.resolve())
+    return str(path.resolve())
 
 
 # ---------------------------------------------------------------------------
@@ -170,12 +193,12 @@ def _remap_annotation_file(
     Returns:
         Tuple of (kept_annotations, discarded_annotations).
     """
-    dst_txt.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(_safe(dst_txt.parent), exist_ok=True)
     kept = 0
     discarded = 0
     output_lines: list[str] = []
 
-    with src_txt.open() as f:
+    with open(_safe(src_txt)) as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -192,7 +215,7 @@ def _remap_annotation_file(
             output_lines.append(" ".join(parts))
             kept += 1
 
-    with dst_txt.open("w") as f:
+    with open(_safe(dst_txt), "w") as f:
         f.write("\n".join(output_lines))
         if output_lines:
             f.write("\n")
@@ -253,8 +276,8 @@ def remap_dataset(
 
         dst_img_dir = dst_root / split / "images"
         dst_lbl_dir = dst_root / split / "labels"
-        dst_img_dir.mkdir(parents=True, exist_ok=True)
-        dst_lbl_dir.mkdir(parents=True, exist_ok=True)
+        os.makedirs(_safe(dst_img_dir), exist_ok=True)
+        os.makedirs(_safe(dst_lbl_dir), exist_ok=True)
 
         image_files = list(img_dir.glob("*.[jJpPbB][pPnNmM][gGpPpP]*"))
         logger.info(f"[{dataset_key}/{split}] Processing {len(image_files)} images...")
@@ -265,12 +288,12 @@ def remap_dataset(
             dst_img = dst_img_dir / img_path.name
             dst_txt = dst_lbl_dir / (img_path.stem + ".txt")
 
-            # Copy image
-            shutil.copy2(img_path, dst_img)
+            # Copy image using safe extended-length paths (Windows MAX_PATH bypass)
+            shutil.copy2(_safe(img_path), _safe(dst_img))
 
             if not txt_path.exists():
                 # No annotation → background image, create empty label
-                dst_txt.touch()
+                open(_safe(dst_txt), "a").close()
                 stats["background"] += 1
                 continue
 
@@ -301,10 +324,23 @@ def remap_all(dataset_keys: list[str] | None = None) -> None:
     class_maps = _load_class_maps()
     keys = dataset_keys or list(class_maps.keys())
 
-    logger.info(f"Remapping {len(keys)} dataset(s): {keys}")
+    # Skip datasets that were never downloaded (raw dir missing or empty)
+    available = []
+    for key in keys:
+        raw_dir = settings.data_raw_dir / key
+        if raw_dir.exists() and any(raw_dir.iterdir()):
+            available.append(key)
+        else:
+            logger.warning(f"[{key}] Raw directory empty or missing — skipping remap.")
+
+    if not available:
+        logger.error("No downloaded datasets found. Run `data download` first.")
+        return
+
+    logger.info(f"Remapping {len(available)} dataset(s): {available}")
     total_stats: dict[str, int] = {"images": 0, "kept": 0, "discarded": 0, "background": 0}
 
-    for key in keys:
+    for key in available:
         stats = remap_dataset(key, class_maps)
         for k in total_stats:
             total_stats[k] += stats.get(k, 0)

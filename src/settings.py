@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # Tracking
     mlflow_tracking_uri: str = Field(
-        "http://localhost:5000", alias="MLFLOW_TRACKING_URI"
+        "sqlite:///runs/mlflow.db", alias="MLFLOW_TRACKING_URI"
     )
 
     # Logging
