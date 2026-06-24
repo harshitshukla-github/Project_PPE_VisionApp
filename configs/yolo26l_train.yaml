@@ -12,8 +12,8 @@
 
 # --- Core ---
 epochs: 100
-imgsz: 416        # reduced from 640 — avoids Windows VA-space OOM on numpy alloc
-batch: 4          # reduced from 8 — lower peak VRAM + fewer concurrent numpy buffers
+imgsz: 640
+batch: 16         # T4 has 16 GB VRAM; reduce to 8 if OOM on smaller GPUs
 patience: 20      # early stopping — stop if no improvement for 20 epochs
 
 # --- Optimizer ---
@@ -46,5 +46,4 @@ mixup: 0.15       # mixup probability
 # --- Misc ---
 pretrained: true  # start from COCO pretrained yolo26l.pt
 exist_ok: false   # fail if run dir already exists (prevents accidental overwrites)
-workers: 0        # 0 = load data in main process; avoids WinError 1455 paging file
-                  # error caused by spawning worker processes that each load cublas DLLs
+# workers: omitted — hyperparams.py sets 0 on Windows, 8 on Linux automatically
