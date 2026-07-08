@@ -11,7 +11,7 @@
 # --- Core ---
 epochs: 100
 imgsz: 640
-batch: 16         # T4 has 16 GB VRAM; reduce to 8 if OOM on smaller GPUs
+batch: 64         # tuned for H100 (80 GB VRAM); use 16 on T4, 8 on <8 GB GPUs
 patience: 20
 
 # --- Optimizer ---
@@ -44,4 +44,5 @@ mixup: 0.15
 # --- Misc ---
 pretrained: true
 exist_ok: false
-# workers: omitted — hyperparams.py sets 0 on Windows, 8 on Linux automatically
+workers: 16       # H100 VM has 24 vCPU — keep the GPU fed; hyperparams.py would
+                  # default to 0 on Windows / 8 on Linux if this line is removed
