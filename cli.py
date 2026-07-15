@@ -404,29 +404,75 @@ def benchmark_cmd(
         "--model", "-m",
         help="Model(s) to benchmark. Omit to benchmark all trained models.",
     ),
+    device: Optional[str] = typer.Option(
+        None,
+        "--device",
+        help="Evaluation device: '0' or 'cpu'. Default: PPB_DEVICE env var.",
+    ),
+    split: str = typer.Option(
+        "test",
+        "--split",
+        help="Dataset split to evaluate: 'test' (unbiased) or 'val'.",
+    ),
     log_level: str = typer.Option("INFO", "--log-level", help="Logging verbosity."),
 ) -> None:
     """Compare trained YOLO26 vs YOLO11 models on the test split.
 
-    Generates a benchmark report at `runs/benchmark_report.md` with:
-    mAP50, mAP50-95, per-class AP, inference latency, model size.
+    Evaluates every trained checkpoint in `models/`, then generates:
 
-    **Status: coming in Phase 1 — evaluation module not yet built.**
+    - `runs/benchmark/benchmark_results.json` — raw metrics
+    - `runs/benchmark/*.png` — comparison plots
+    - `runs/benchmark_report.md` — the decision report
+
+    **Example:**
+
+    ```bash
+    uv run python cli.py benchmark                      # all trained models
+    uv run python cli.py benchmark -m yolo26l -m yolo11l --device 0
+    ```
     """
     _setup_logger(log_level)
-    _not_yet_implemented(
-        command="benchmark",
-        phase="Phase 1",
-        module="src/evaluation/benchmark.py",
-        workaround=(
-            "Run ultralytics val manually:\n"
-            "  uv run python -c \"\n"
-            "  from ultralytics import YOLO\n"
-            "  YOLO('models/yolo26l_ppe_best.pt').val(data='configs/data.yaml')\n"
-            "  \""
-        ),
-    )
-    raise typer.Exit(code=1)
+    from src.evaluation.benchmark import run_benchmark
+    from src.evaluation.report import generate_report
+    from src.evaluation.visualize import generate_plots
+
+    keys = [m.value for m in models] if models else None
+    console.print(Panel(
+        f"Benchmarking: [bold cyan]{keys or 'all trained models'}[/]  |  "
+        f"Split: [bold]{split}[/]  |  Device: [bold]{device or settings.ppb_device}[/]",
+        title="PPB — Benchmark",
+        border_style="blue",
+    ))
+
+    results = run_benchmark(keys, device=device, split=split)
+    generate_plots(results)
+    report_path = generate_report(results)
+
+    # Summary table in the terminal
+    table = Table(title=f"Benchmark — {split} split", header_style="bold blue")
+    table.add_column("Model", style="cyan")
+    table.add_column("mAP50")
+    table.add_column("mAP50-95")
+    table.add_column("Latency")
+    table.add_column("FPS")
+    table.add_column("Size")
+    best = max(r.map50_95 for r in results)
+    for r in results:
+        mark = " 🥇" if r.map50_95 == best else ""
+        table.add_row(
+            r.model_name,
+            f"{r.map50:.4f}",
+            f"{r.map50_95:.4f}{mark}",
+            f"{r.total_latency_ms:.1f} ms",
+            f"{r.fps:.1f}",
+            f"{r.size_mb:.1f} MB",
+        )
+    console.print(table)
+    console.print(Panel(
+        f"[green]Report:[/] {report_path}",
+        title="Benchmark Complete",
+        border_style="green",
+    ))
 
 
 # ---------------------------------------------------------------------------
