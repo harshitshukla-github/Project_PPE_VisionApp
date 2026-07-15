@@ -1,0 +1,37 @@
+# ============================================================================
+# PPB Vision Module — Job PPE Matrix
+#
+# Maps each job category to the PPE classes REQUIRED for compliance.
+# Class names must match configs/data.yaml.
+#
+# NOTE: boots, ear_protection, face_shield, harness are NOT yet detectable
+# (zero training data — see runs/benchmark_report.md). They are listed under
+# `pending` so the API can report them as "unverifiable" instead of silently
+# passing/failing them. Move them to `required` once the model is retrained
+# with data for those classes.
+# ============================================================================
+
+jobs:
+  general_labor:
+    required: [hardhat, safety_vest]
+    pending: [boots]
+
+  welder:
+    required: [hardhat, safety_vest, goggles, gloves]
+    pending: [face_shield, boots]
+
+  electrician:
+    required: [hardhat, safety_vest, gloves, goggles]
+    pending: [boots]
+
+  height_work:
+    required: [hardhat, safety_vest]
+    pending: [harness, boots]
+
+  demolition:
+    required: [hardhat, safety_vest, goggles, mask, gloves]
+    pending: [boots, ear_protection]
+
+  painter:
+    required: [hardhat, safety_vest, mask, goggles]
+    pending: []

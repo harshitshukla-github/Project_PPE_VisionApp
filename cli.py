@@ -526,23 +526,50 @@ def serve_cmd(
     ),
     port: int = typer.Option(8000, "--port", "-p", help="Port to bind the server to."),
     host: str = typer.Option("0.0.0.0", "--host", help="Host to bind the server to."),
+    device: Optional[str] = typer.Option(
+        None,
+        "--device",
+        help="Inference device: '0' or 'cpu'. Default: PPB_DEVICE env var.",
+    ),
     log_level: str = typer.Option("INFO", "--log-level", help="Logging verbosity."),
 ) -> None:
     """Launch the FastAPI PPE compliance inference server.
 
     Serves the `/detect`, `/compliance/check`, `/health`, and `/model/info`
-    endpoints. Gemini 2.5 Flash is invoked automatically on FAIL verdicts.
+    endpoints under `/api/v1`. Gemini 2.5 Flash is invoked automatically on
+    FAIL verdicts (never on PASS — cost optimization).
 
-    **Status: coming in Phase 2 — FastAPI server not yet built.**
+    **Examples:**
+
+    ```bash
+    uv run python cli.py serve --model yolo11l              # production pick
+    uv run python cli.py serve --model yolo26n --port 8080  # edge model
+    ```
     """
+    import os
+
+    import uvicorn
+
     _setup_logger(log_level)
-    _not_yet_implemented(
-        command="serve",
-        phase="Phase 2",
-        module="src/api/main.py",
-        workaround=None,
+    from src.api.main import DEVICE_ENV_VAR, MODEL_ENV_VAR
+
+    # The lifespan hook reads these to select the model at startup.
+    os.environ[MODEL_ENV_VAR] = model.value
+    if device:
+        os.environ[DEVICE_ENV_VAR] = device
+
+    console.print(Panel(
+        f"Serving [bold cyan]{model.value}[/] on [bold]http://{host}:{port}[/]\n"
+        f"Docs: [bold]http://{host if host != '0.0.0.0' else 'localhost'}:{port}/docs[/]",
+        title="PPB — Inference Server",
+        border_style="blue",
+    ))
+    uvicorn.run(
+        "src.api.main:app",
+        host=host,
+        port=port,
+        log_level=log_level.lower(),
     )
-    raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------
