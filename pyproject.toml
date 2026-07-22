@@ -80,4 +80,26 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src --cov-report=term-missing"
+addopts = "--cov=src --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+# Excluded from unit coverage: modules whose core paths need the network
+# (Roboflow/Kaggle downloads), a GPU + real weights (training loop), or
+# multi-GB datasets (remap/split/validate). These are exercised by the real
+# pipeline runs (cli data pipeline / cli train) rather than unit tests.
+omit = [
+    "src/data/downloader.py",
+    "src/data/remapper.py",
+    "src/data/splitter.py",
+    "src/data/validator.py",
+    "src/training/trainer.py",
+    "src/training/callbacks.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "def main\\(",
+]

@@ -490,29 +490,54 @@ def export_cmd(
         help="Export format.",
         show_choices=True,
     ),
+    half: bool = typer.Option(
+        False, "--half", help="Export FP16 weights (~50% smaller)."
+    ),
+    int8: bool = typer.Option(
+        False, "--int8",
+        help="Additionally produce an INT8-quantized ONNX (~75% smaller, CPU-fast). "
+             "Only valid with --format onnx.",
+    ),
+    imgsz: Optional[int] = typer.Option(
+        None, "--imgsz", help="Export image size. Default: PPB_IMG_SIZE env var."
+    ),
+    device: str = typer.Option(
+        "cpu", "--device",
+        help="Device for the export trace. TensorRT ('engine') needs a GPU, e.g. '0'.",
+    ),
     log_level: str = typer.Option("INFO", "--log-level", help="Logging verbosity."),
 ) -> None:
     """Export a trained model to ONNX / TFLite / TorchScript / TensorRT.
 
-    Reads from `models/<model>_ppe_best.pt` and writes the export to
+    Reads from `models/<model>_ppe_best.pt` and writes the artifact to
     `models/exports/`.
 
-    **Status: coming in Phase 1 — export module not yet built.**
+    **Examples:**
+
+    ```bash
+    uv run python cli.py export --model yolo11l                    # FP32 ONNX
+    uv run python cli.py export --model yolo26n --half --int8      # edge bundle
+    ```
     """
     _setup_logger(log_level)
-    _not_yet_implemented(
-        command="export",
-        phase="Phase 1",
-        module="src/export/onnx_export.py",
-        workaround=(
-            f"Export manually with ultralytics:\n"
-            f"  uv run python -c \"\n"
-            f"  from ultralytics import YOLO\n"
-            f"  YOLO('models/{model.value}_ppe_best.pt').export(format='{fmt.value}')\n"
-            f"  \""
-        ),
+    from src.export.onnx_export import export_model
+
+    if int8 and fmt is not ExportFormat.onnx:
+        console.print("[red]Error:[/] --int8 requires --format onnx")
+        raise typer.Exit(code=1)
+
+    artifact = export_model(
+        model.value, fmt=fmt.value, half=half, imgsz=imgsz, device=device
     )
-    raise typer.Exit(code=1)
+    lines = [f"[green]Exported:[/] {artifact}"]
+
+    if int8:
+        from src.export.quantize import quantize_onnx_int8
+
+        int8_path = quantize_onnx_int8(artifact)
+        lines.append(f"[green]INT8:[/]     {int8_path}")
+
+    console.print(Panel("\n".join(lines), title="Export Complete", border_style="green"))
 
 
 # ---------------------------------------------------------------------------
@@ -615,27 +640,6 @@ def info_cmd() -> None:
         status_table.add_row(label, "[green]✓ ready[/]" if exists else "[yellow]✗ missing[/]")
 
     console.print(status_table)
-
-
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
-def _not_yet_implemented(
-    command: str,
-    phase: str,
-    module: str,
-    workaround: str | None,
-) -> None:
-    """Print a consistent 'not yet implemented' message."""
-    msg = (
-        f"[bold yellow]`{command}`[/] is not yet implemented.\n\n"
-        f"  Planned for: [bold]{phase}[/]\n"
-        f"  Module:      [cyan]{module}[/]"
-    )
-    if workaround:
-        msg += f"\n\n[bold]Workaround:[/]\n  {workaround}"
-    console.print(Panel(msg, title="Coming Soon", border_style="yellow"))
 
 
 # ---------------------------------------------------------------------------
