@@ -50,3 +50,7 @@ mlruns/
 dist/
 build/
 *.egg-info/
+
+# Test coverage
+.coverage
+htmlcov/
