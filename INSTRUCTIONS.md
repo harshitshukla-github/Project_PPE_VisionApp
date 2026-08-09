@@ -108,9 +108,19 @@ Semantics the UI must respect:
   lists valid ones), network failure = server unreachable (see §5).
 
 ### GET /jobs
-Returns `{ "job_categories": { "<key>": { "display_name": ..., "required_equipment": [...], "optional_equipment": [...] } } }`.
-Use keys as dropdown values, `display_name` as labels. Cache in memory;
-refetch on pull-to-refresh.
+Returns a **flat map** — job key → requirements (no wrapper object, no
+display names):
+```json
+{
+  "welder": { "required": ["hardhat", "goggles", "gloves"], "pending": ["face_shield"] },
+  "general_labor": { "required": ["hardhat", "safety_vest"], "pending": ["boots"] }
+}
+```
+- Dropdown values = the object keys. For labels, title-case the key in the
+  app (`general_labor` → "General Labor").
+- `required` = what the check enforces; `pending` = equipment the model
+  can't detect yet (these surface as `unverifiable_equipment` in check
+  results). Cache in memory; refetch on pull-to-refresh.
 
 ### GET /health
 `{ "status": "ok", "model": "...", ... }` — use for the connection
