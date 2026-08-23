@@ -476,6 +476,88 @@ def benchmark_cmd(
 
 
 # ---------------------------------------------------------------------------
+# probe command — single-image diagnostic
+# ---------------------------------------------------------------------------
+
+@app.command("probe")
+def probe_cmd(
+    image: Path = typer.Argument(
+        ...,
+        help="Photo to analyse (JPEG/PNG).",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
+    job: Optional[str] = typer.Option(
+        None,
+        "--job", "-j",
+        help="Job category from the PPE matrix, e.g. `general_labor`. "
+             "Adds the per-class diagnosis and the verdict the API would return.",
+    ),
+    model: Optional[ModelVariant] = typer.Option(
+        None,
+        "--model", "-m",
+        help="Model variant to probe. Default: PPB_MODEL_NAME env var.",
+    ),
+    device: Optional[str] = typer.Option(
+        None,
+        "--device",
+        help="Inference device: '0' or 'cpu'. Default: PPB_DEVICE env var.",
+    ),
+    conf: float = typer.Option(
+        0.01,
+        "--conf",
+        help="Probe confidence floor. Lower surfaces more of what the model considered.",
+    ),
+    save: bool = typer.Option(
+        False,
+        "--save",
+        help="Write an annotated copy to `runs/probe/` "
+             "(green = kept, red = below production threshold).",
+    ),
+    log_level: str = typer.Option("WARNING", "--log-level", help="Logging verbosity."),
+) -> None:
+    """Diagnose why one photo produced its verdict.
+
+    Runs the image at a near-zero confidence floor so you can see **every**
+    detection the model considered — including the ones the production
+    threshold discards — then re-runs it at larger input sizes and with TTA.
+
+    For each required PPE class it reports one of:
+
+    - `DETECTED`   — found above the production threshold
+    - `CONFIG FIX` — missed at baseline, recovered by bigger imgsz / TTA
+    - `THRESHOLD`  — the model saw it, the threshold discarded it
+    - `DATA GAP`   — never seen at any config; needs training data
+
+    Use this when a real photo produces a surprising FAIL: it separates a
+    one-line settings fix from a genuine model problem.
+
+    **Examples:**
+
+    ```bash
+    uv run python cli.py probe worker.jpg --job general_labor --save
+    uv run python cli.py probe worker.jpg -j welder -m yolo26l --device cpu
+    ```
+    """
+    _setup_logger(log_level)
+    from src.evaluation.probe import probe_image
+
+    try:
+        probe_image(
+            image_path=image,
+            job_category=job,
+            model_name=model.value if model else None,
+            device=device,
+            conf_floor=conf,
+            save_annotated=save,
+        )
+    except (FileNotFoundError, ValueError, KeyError) as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+# ---------------------------------------------------------------------------
 # export command  (Phase 1 — export module not yet built)
 # ---------------------------------------------------------------------------
 

@@ -5,6 +5,8 @@ All endpoints live under the ``/api/v1`` prefix (agents.md §9).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from loguru import logger
@@ -25,8 +27,72 @@ from src.settings import settings
 router = APIRouter(prefix="/api/v1")
 
 
+#: Extensions we will reproduce in a dump filename. Anything else becomes
+#: ``.bin`` — the uploaded name is client-controlled and never trusted.
+_DUMPABLE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp"})
+
+
+def _safe_suffix(filename: str | None) -> str:
+    """Extract a safe file extension from a client-supplied filename.
+
+    Only the suffix is ever taken, and only from a fixed whitelist, so a
+    hostile ``filename`` (``../../etc/passwd``, absolute paths, NUL bytes)
+    cannot influence where the dump lands.
+
+    Args:
+        filename: The client-supplied upload filename, if any.
+
+    Returns:
+        A whitelisted extension including the leading dot, or ``".bin"``.
+    """
+    suffix = Path(filename or "").suffix.lower()
+    return suffix if suffix in _DUMPABLE_SUFFIXES else ".bin"
+
+
+def _dump_upload(data: bytes, filename: str | None) -> Path | None:
+    """Write raw upload bytes to disk for offline diagnosis.
+
+    Captures exactly what arrived over the wire, before any decoding, so the
+    dumped file can be replayed through ``cli.py probe`` with no ambiguity
+    about what the client sent. No-op unless ``PPB_DEBUG_DUMP_UPLOADS=true``.
+
+    The output name is built entirely server-side from a UTC timestamp and a
+    content hash; only a whitelisted extension is taken from the client.
+
+    Args:
+        data: Raw request-body bytes for the uploaded file.
+        filename: Client-supplied filename (used only for its extension).
+
+    Returns:
+        Path written, or None when dumping is disabled or the write failed.
+    """
+    if not settings.ppb_debug_dump_uploads:
+        return None
+
+    import hashlib  # noqa: PLC0415
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")[:-3]
+    digest = hashlib.sha256(data).hexdigest()[:8]
+    out_path = settings.ppb_debug_dump_dir / f"{stamp}_{digest}{_safe_suffix(filename)}"
+
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(data)
+    except OSError as exc:
+        # Diagnostics must never take down a request.
+        logger.error(f"[upload-dump] Failed to write {out_path}: {exc}")
+        return None
+
+    return out_path
+
+
 async def _decode_upload(image: UploadFile) -> np.ndarray:
     """Decode an uploaded file into a BGR numpy array.
+
+    When ``PPB_DEBUG_DUMP_UPLOADS=true`` the raw bytes are written to
+    ``PPB_DEBUG_DUMP_DIR`` first, and the decoded dimensions are logged — the
+    fastest way to tell whether a client is downscaling before upload.
 
     Raises:
         HTTPException: 400 if the payload is not a decodable image.
@@ -36,11 +102,25 @@ async def _decode_upload(image: UploadFile) -> np.ndarray:
     data = await image.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty image upload.")
+
+    dumped = _dump_upload(data, image.filename)
+
     array = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
     if array is None:
+        if dumped:
+            logger.warning(f"[upload-dump] Undecodable payload saved to {dumped}")
         raise HTTPException(
             status_code=400,
             detail=f"Could not decode image '{image.filename}'. Send JPEG or PNG.",
+        )
+
+    if dumped:
+        height, width = array.shape[:2]
+        # WARNING level so an accidentally-enabled dump is impossible to miss.
+        logger.warning(
+            f"[upload-dump] {dumped.name} — {len(data):,} bytes, "
+            f"decoded {width}x{height} px  →  "
+            f"uv run python cli.py probe {dumped} --job <job>"
         )
     return array
 

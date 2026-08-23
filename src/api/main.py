@@ -21,6 +21,7 @@ from loguru import logger
 from src.api.deps import init_detector
 from src.api.middleware import add_middleware
 from src.api.routes import router
+from src.settings import settings
 
 # Read by the lifespan hook; set by cli.py serve before uvicorn starts.
 MODEL_ENV_VAR = "PPB_SERVE_MODEL"
@@ -33,6 +34,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     model_name = os.environ.get(MODEL_ENV_VAR) or None
     device = os.environ.get(DEVICE_ENV_VAR) or None
     detector = init_detector(model_name=model_name, device=device)
+
+    if settings.ppb_debug_dump_uploads:
+        logger.warning(
+            "PPB_DEBUG_DUMP_UPLOADS is ON — every uploaded photo is being "
+            f"written to {settings.ppb_debug_dump_dir}. This stores personal "
+            "data on disk; turn it off when you are done diagnosing."
+        )
+
     logger.success(f"PPB API ready — serving {detector.model_name} on {detector.device}")
     yield
     logger.info("PPB API shutting down.")

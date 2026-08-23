@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = Field("INFO", alias="LOG_LEVEL")
 
+    # Debug — capture raw uploads for offline diagnosis with `cli.py probe`.
+    # Writes the exact bytes the API received, before any decoding, so there is
+    # no ambiguity about what the client sent. Off by default: uploads are
+    # worker photos, so this stores personal data on disk. Never enable in
+    # production.
+    ppb_debug_dump_uploads: bool = Field(False, alias="PPB_DEBUG_DUMP_UPLOADS")
+    ppb_debug_dump_dir: Path = Field(
+        Path("runs/uploads"), alias="PPB_DEBUG_DUMP_DIR"
+    )
+
     # Paths (relative to project root)
     data_raw_dir: Path = Path("data/raw")
     data_processed_dir: Path = Path("data/processed")
