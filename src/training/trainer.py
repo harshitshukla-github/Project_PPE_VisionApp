@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # ── Windows virtual-address-space fragmentation mitigation ───────────────────
@@ -105,16 +106,58 @@ def _check_data_yaml() -> Path:
 # Post-training: save best weights to models/
 # ---------------------------------------------------------------------------
 
-def _save_best_weights(run_dir: Path, model_name: str) -> Path | None:
-    """Copy the best training checkpoint to ``models/``.
+def _archive_existing(dest: Path) -> Path | None:
+    """Move an existing checkpoint into ``models/archive/`` before it is replaced.
+
+    The archive name carries the old file's modification date, so the
+    previous model stays identifiable and can be restored or benchmarked
+    against its successor.
 
     Args:
-        run_dir: The ultralytics run output directory (``runs/<name>/``).
-        model_name: Model variant name, e.g. ``"yolo26l"``.
+        dest: Checkpoint that is about to be overwritten.
 
     Returns:
-        Path to the saved ``models/<model_name>_ppe_best.pt``, or None
-        if the best weights file was not found (training may have failed).
+        Where the old file was moved, or None if there was nothing to archive.
+    """
+    if not dest.exists():
+        return None
+
+    stamp = datetime.fromtimestamp(dest.stat().st_mtime).strftime("%Y-%m-%d_%H%M")
+    archive_dir = MODELS_DIR / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    target = archive_dir / f"{dest.stem}.{stamp}{dest.suffix}"
+    suffix = 1
+    while target.exists():
+        target = archive_dir / f"{dest.stem}.{stamp}_{suffix}{dest.suffix}"
+        suffix += 1
+    shutil.move(str(dest), target)
+    logger.info(f"Previous checkpoint archived → {target}")
+    return target
+
+
+def _save_best_weights(
+    run_dir: Path,
+    model_name: str,
+    run_name: str | None = None,
+) -> Path | None:
+    """Copy the best training checkpoint to ``models/``.
+
+    ``models/<model>_ppe_best.pt`` is what the API and CLI load by default, so
+    only a default-named run is promoted into that slot. A run started with
+    ``--run-name`` (a smoke test, an experiment) is saved as
+    ``models/<run_name>_best.pt`` instead and never displaces the served model.
+
+    Whatever the slot, an existing file there is archived rather than
+    overwritten — a one-epoch test run once replaced a 50-epoch model this way.
+
+    Args:
+        run_dir: The ultralytics run output directory.
+        model_name: Model variant name, e.g. ``"yolo26l"``.
+        run_name: Custom run name, if one was given.
+
+    Returns:
+        Path to the saved checkpoint, or None if ``best.pt`` was not found
+        (training may have failed).
     """
     best_src = run_dir / "weights" / "best.pt"
     if not best_src.exists():
@@ -122,9 +165,20 @@ def _save_best_weights(run_dir: Path, model_name: str) -> Path | None:
         return None
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    dest = MODELS_DIR / f"{model_name}_ppe_best.pt"
+    if run_name:
+        dest = MODELS_DIR / f"{run_name}_best.pt"
+    else:
+        dest = MODELS_DIR / f"{model_name}_ppe_best.pt"
+
+    _archive_existing(dest)
     shutil.copy2(best_src, dest)
     logger.success(f"Best weights saved → {dest}")
+    if run_name:
+        logger.info(
+            f"Custom run name, so the served model models/{model_name}_ppe_best.pt "
+            "was left untouched. Promote this checkpoint by copying it there "
+            "once you've benchmarked it."
+        )
     return dest
 
 
@@ -234,7 +288,7 @@ def train(
     if results is not None and hasattr(results, "save_dir"):
         run_dir = Path(results.save_dir)
 
-    best_pt = _save_best_weights(run_dir, model_name)
+    best_pt = _save_best_weights(run_dir, model_name, run_name=run_name)
     return best_pt
 
 

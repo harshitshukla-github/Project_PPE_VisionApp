@@ -98,22 +98,56 @@ ROBOFLOW_DATASETS: list[DatasetConfig] = [
 ]
 
 
+def _is_valid_slug(slug: str) -> bool:
+    """Check that a Kaggle dataset identifier is a usable ``owner/name`` pair.
+
+    A malformed slug fails as an opaque 404 from the Kaggle API, which reads
+    like a network or permissions problem rather than a config typo. This has
+    already cost the project one silently-skipped dataset, so the shape is
+    checked up front instead.
+
+    Rejects: missing ``/``, empty halves, more than one ``/``, and the
+    ``owner`` placeholder carried over from .env.example.
+
+    Args:
+        slug: Candidate identifier, e.g. ``"niravnaik/safety-helmet"``.
+
+    Returns:
+        True if the slug is well-formed.
+    """
+    parts = slug.strip().split("/")
+    if len(parts) != 2:
+        return False
+    owner, name = (p.strip() for p in parts)
+    return bool(owner) and bool(name) and owner.lower() != "owner"
+
+
 def _build_kaggle_registry() -> list[KaggleDatasetConfig]:
     """Build the Kaggle dataset registry from settings.
 
-    The Kaggle dataset identifier is read from ``KAGGLE_PPE_DATASET`` in .env.
-    Returns an empty list if the env var is not set, so Roboflow-only runs
-    still work without Kaggle credentials.
+    The identifier comes from ``KAGGLE_PPE_DATASET``, defaulting to the
+    Safety Helmet & Reflective Jacket dataset. Returns an empty list when the
+    slug is unset or malformed, so Roboflow-only runs still work.
 
     Returns:
         List of configured Kaggle datasets.
     """
-    if not settings.kaggle_ppe_dataset:
+    slug = settings.kaggle_ppe_dataset.strip()
+    if not slug:
         return []
+
+    if not _is_valid_slug(slug):
+        logger.error(
+            f"KAGGLE_PPE_DATASET is malformed: '{slug}'. "
+            "Expected '<owner>/<name>' exactly as it appears in the URL "
+            "kaggle.com/datasets/<owner>/<name> — skipping the Kaggle dataset."
+        )
+        return []
+
     return [
         KaggleDatasetConfig(
             key="kaggle_ppe",
-            identifier=settings.kaggle_ppe_dataset,
+            identifier=slug,
             description="Safety Helmet & Reflective Jacket (~5,000 images)",
         ),
     ]
@@ -156,12 +190,170 @@ def download_roboflow_dataset(cfg: DatasetConfig, output_root: Path) -> Path:
             location=str(dest),
             overwrite=True,  # safe — our own check above already confirmed dest is empty
         )
-        logger.success(f"[{cfg.key}] Saved to: {dataset.location}")
-        return Path(dataset.location)
+        location = Path(dataset.location)
+        logger.success(f"[{cfg.key}] Saved to: {location}")
+        # The SDK reports success even when its extraction stopped early at
+        # MAX_PATH, so never trust the exit status alone — count the files.
+        verify_and_repair(cfg.key, location)
+        return location
 
     except Exception as exc:
         logger.error(f"[{cfg.key}] Download failed: {exc}")
         raise RuntimeError(f"Failed to download {cfg.key}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Archive extraction (Windows MAX_PATH-safe)
+# ---------------------------------------------------------------------------
+
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp")
+
+
+def _long_path(path: Path) -> str:
+    r"""Return an extended-length path string on Windows to bypass MAX_PATH.
+
+    Roboflow filenames routinely exceed the 260-character limit (the
+    ppe_combined archive reaches 307). Prefixing the resolved absolute path
+    with ``\\?\`` tells the Windows API to skip the check. No-op elsewhere.
+
+    ``src/data/remapper.py`` carries the same shim; it is duplicated rather
+    than shared so the two modules stay independent.
+
+    Args:
+        path: Path to convert.
+
+    Returns:
+        Path string safe for ``open()`` and ``os`` calls.
+    """
+    if sys.platform == "win32":
+        return "\\\\?\\" + str(path.resolve())
+    return str(path.resolve())
+
+
+def count_images_in_zip(zip_path: Path) -> int:
+    """Count image entries inside an archive.
+
+    Args:
+        zip_path: Archive to inspect.
+
+    Returns:
+        Number of image members.
+    """
+    import zipfile  # noqa: PLC0415
+
+    with zipfile.ZipFile(zip_path) as zf:
+        return sum(1 for m in zf.namelist() if m.lower().endswith(IMAGE_SUFFIXES))
+
+
+def count_images_on_disk(root: Path) -> int:
+    """Count extracted images beneath a directory.
+
+    Args:
+        root: Directory to walk.
+
+    Returns:
+        Number of image files found.
+    """
+    total = 0
+    for dirpath, _, filenames in os.walk(root):
+        if os.path.basename(dirpath) == "images":
+            total += sum(1 for f in filenames if f.lower().endswith(IMAGE_SUFFIXES))
+    return total
+
+
+def extract_archive(zip_path: Path, dest: Path) -> int:
+    """Extract an archive using Windows-safe long paths.
+
+    The Roboflow SDK's own extraction stops silently when it hits MAX_PATH,
+    leaving a partial dataset and still reporting success — which previously
+    cost this project 25,000 images without any error surfacing.
+
+    Args:
+        zip_path: Archive to extract.
+        dest: Directory to extract into.
+
+    Returns:
+        Number of files written.
+
+    Raises:
+        FileNotFoundError: If the archive is missing.
+    """
+    import zipfile  # noqa: PLC0415
+
+    if not zip_path.exists():
+        raise FileNotFoundError(f"Archive not found: {zip_path}")
+
+    written = 0
+    with zipfile.ZipFile(zip_path) as zf:
+        for member in zf.namelist():
+            if member.endswith("/"):
+                continue
+            target = dest / member
+            os.makedirs(_long_path(target.parent), exist_ok=True)
+            with zf.open(member) as src, open(_long_path(target), "wb") as out:
+                out.write(src.read())
+            written += 1
+    return written
+
+
+def verify_and_repair(dataset_key: str, dataset_dir: Path) -> bool:
+    """Check an extracted dataset against its archive, re-extracting if short.
+
+    Args:
+        dataset_key: Dataset key, for log messages.
+        dataset_dir: Directory holding the extracted dataset (and its zip).
+
+    Returns:
+        True if the dataset is complete (or was successfully repaired).
+    """
+    zip_path = dataset_dir / "roboflow.zip"
+    if not zip_path.exists():
+        # No archive to compare against — nothing we can verify.
+        return True
+
+    expected = count_images_in_zip(zip_path)
+    actual = count_images_on_disk(dataset_dir)
+    if actual >= expected:
+        logger.success(f"[{dataset_key}] Extraction verified: {actual:,} images.")
+        return True
+
+    logger.warning(
+        f"[{dataset_key}] Incomplete extraction: {actual:,} of {expected:,} images "
+        "on disk. This is the Windows MAX_PATH limit — re-extracting with "
+        "long-path support."
+    )
+    written = extract_archive(zip_path, dataset_dir)
+    repaired = count_images_on_disk(dataset_dir)
+    if repaired >= expected:
+        logger.success(
+            f"[{dataset_key}] Repaired: {written:,} files written, {repaired:,} images."
+        )
+        return True
+
+    logger.error(
+        f"[{dataset_key}] Still short after re-extraction: {repaired:,}/{expected:,}."
+    )
+    return False
+
+
+def repair_all(dataset_keys: list[str] | None = None) -> dict[str, bool]:
+    """Verify every downloaded dataset and repair truncated extractions.
+
+    Args:
+        dataset_keys: Datasets to check. Defaults to all Roboflow datasets.
+
+    Returns:
+        Mapping of dataset key → whether it is now complete.
+    """
+    keys = dataset_keys or [d.key for d in ROBOFLOW_DATASETS]
+    results: dict[str, bool] = {}
+    for key in keys:
+        dataset_dir = settings.data_raw_dir / key
+        if not dataset_dir.exists():
+            logger.warning(f"[{key}] Not downloaded — skipping.")
+            continue
+        results[key] = verify_and_repair(key, dataset_dir)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -171,19 +363,44 @@ def download_roboflow_dataset(cfg: DatasetConfig, output_root: Path) -> Path:
 def _configure_kaggle_credentials() -> None:
     """Inject Kaggle credentials from settings into the environment.
 
-    The ``kaggle`` package reads ``KAGGLE_USERNAME`` and ``KAGGLE_KEY`` from
-    the environment (or ``~/.kaggle/kaggle.json``). Setting them here ensures
-    credentials loaded from ``.env`` are picked up before the first API call.
+    pydantic-settings loads ``.env`` into the ``settings`` object but never
+    writes to ``os.environ``, so values must be exported here before the
+    ``kaggle`` client reads them.
+
+    The client tries auth in this order (kagglesdk ``get_access_token_from_env``):
+
+    1. ``KAGGLE_API_TOKEN`` — the current ``KGAT_...`` bearer token. The
+       username is introspected from the token, so no username is needed.
+    2. ``~/.kaggle/access_token`` (or ``access_token.txt``) — same token,
+       read from disk.
+    3. ``KAGGLE_USERNAME`` + ``KAGGLE_KEY`` — the legacy ``kaggle.json`` pair.
+
+    Any one of these is sufficient; the warning fires only when none is set.
     """
+    if settings.kaggle_api_token:
+        os.environ["KAGGLE_API_TOKEN"] = settings.kaggle_api_token
     if settings.kaggle_username:
         os.environ["KAGGLE_USERNAME"] = settings.kaggle_username
     if settings.kaggle_key:
         os.environ["KAGGLE_KEY"] = settings.kaggle_key
 
-    if not settings.kaggle_username or not settings.kaggle_key:
+    has_token = bool(settings.kaggle_api_token)
+    has_legacy = bool(settings.kaggle_username and settings.kaggle_key)
+    token_file = Path.home() / ".kaggle" / "access_token"
+    legacy_file = Path.home() / ".kaggle" / "kaggle.json"
+
+    if has_token:
+        logger.debug("Kaggle auth: using KAGGLE_API_TOKEN from settings.")
+    elif has_legacy:
+        logger.debug("Kaggle auth: using legacy KAGGLE_USERNAME + KAGGLE_KEY.")
+    elif token_file.exists() or legacy_file.exists():
+        logger.debug(f"Kaggle auth: relying on {token_file.parent} on disk.")
+    else:
         logger.warning(
-            "KAGGLE_USERNAME or KAGGLE_KEY is not set. "
-            "Kaggle download will only succeed if ~/.kaggle/kaggle.json exists."
+            "No Kaggle credentials found. Set KAGGLE_API_TOKEN in .env "
+            "(get a KGAT_... token from kaggle.com -> Settings -> API), or "
+            "save it to ~/.kaggle/access_token. The legacy "
+            "KAGGLE_USERNAME + KAGGLE_KEY pair also works."
         )
 
 

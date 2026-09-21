@@ -144,6 +144,55 @@ def data_download(
     download_all(dataset_keys=keys)
 
 
+@data_app.command("extract")
+def data_extract(
+    dataset: Optional[list[DatasetKey]] = typer.Option(
+        None,
+        "--dataset", "-d",
+        help="Dataset(s) to verify. Omit to check all Roboflow datasets.",
+    ),
+    log_level: str = typer.Option("INFO", "--log-level", help="Logging verbosity."),
+) -> None:
+    """Verify downloaded archives extracted fully, and repair them if not.
+
+    On Windows the Roboflow SDK's extraction stops silently when a path
+    exceeds the 260-character `MAX_PATH` limit — leaving a partial dataset
+    while still reporting success. Roboflow filenames routinely exceed it.
+
+    This compares the image count inside each `roboflow.zip` against what is
+    actually on disk, and re-extracts with long-path support when short.
+
+    **Example:**
+
+    ```bash
+    uv run python cli.py data extract
+    ```
+    """
+    _setup_logger(log_level)
+    from src.data.downloader import repair_all
+
+    keys = [d.value for d in dataset] if dataset else None
+    console.print(Panel(
+        f"Verifying extraction: [bold cyan]{keys or 'all Roboflow datasets'}[/]",
+        title="PPB — Archive Check",
+        border_style="blue",
+    ))
+
+    results = repair_all(dataset_keys=keys)
+    if not results:
+        console.print("[yellow]Nothing to check.[/]")
+        return
+
+    incomplete = [k for k, ok in results.items() if not ok]
+    if incomplete:
+        console.print(f"[red]Still incomplete:[/] {incomplete}")
+        raise typer.Exit(code=1)
+    console.print(Panel(
+        f"[green]All {len(results)} dataset(s) verified complete.[/]",
+        border_style="green",
+    ))
+
+
 @data_app.command("remap")
 def data_remap(
     dataset: Optional[list[DatasetKey]] = typer.Option(
@@ -209,6 +258,12 @@ def data_split(
     train: float = typer.Option(0.80, "--train", help="Train fraction."),
     val: float = typer.Option(0.10, "--val", help="Validation fraction."),
     seed: int = typer.Option(42, "--seed", help="Random seed for reproducibility."),
+    clean: bool = typer.Option(
+        False,
+        "--clean",
+        help="Delete any existing splits first. Required when `data/splits/` "
+             "already holds a previous run — otherwise the two get mixed.",
+    ),
     log_level: str = typer.Option("INFO", "--log-level", help="Logging verbosity."),
 ) -> None:
     """Split processed images into train / val / test sets.
@@ -233,7 +288,7 @@ def data_split(
         title="PPB — Dataset Splitter",
         border_style="blue",
     ))
-    run_split(train_ratio=train, val_ratio=val, seed=seed)
+    run_split(train_ratio=train, val_ratio=val, seed=seed, clean=clean)
 
 
 @data_app.command("pipeline")

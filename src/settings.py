@@ -23,11 +23,24 @@ class Settings(BaseSettings):
     roboflow_api_key: str = Field(..., alias="ROBOFLOW_API_KEY")
     google_api_key: str = Field(..., alias="GOOGLE_API_KEY")
 
-    # Kaggle credentials (required only when downloading Kaggle datasets)
+    # Kaggle credentials (required only when downloading Kaggle datasets).
+    # Two auth schemes exist; the client prefers the token and falls back to
+    # the legacy username+key pair:
+    #   - kaggle_api_token: current scheme, a single "KGAT_..." bearer token
+    #     from kaggle.com Settings -> API. The username is introspected from
+    #     the token, so kaggle_username/kaggle_key are not needed alongside it.
+    #   - kaggle_username + kaggle_key: legacy scheme, from kaggle.json.
+    kaggle_api_token: str = Field("", alias="KAGGLE_API_TOKEN")
     kaggle_username: str = Field("", alias="KAGGLE_USERNAME")
     kaggle_key: str = Field("", alias="KAGGLE_KEY")
     # Kaggle PPE dataset identifier: "owner/dataset-name" from kaggle.com/datasets/...
-    kaggle_ppe_dataset: str = Field("", alias="KAGGLE_PPE_DATASET")
+    # Defaults to the Safety Helmet & Reflective Jacket set, which labels helmets
+    # and vests on the SAME images — the co-occurrence the Roboflow sources lack.
+    # Override in .env only to point at a different dataset.
+    kaggle_ppe_dataset: str = Field(
+        "niravnaik/safety-helmet-and-reflective-jacket",
+        alias="KAGGLE_PPE_DATASET",
+    )
 
     # Model
     ppb_model_name: str = Field("yolo26l", alias="PPB_MODEL_NAME")
