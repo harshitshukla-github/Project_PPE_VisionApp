@@ -26,6 +26,18 @@ export async function setServerUrl(url: string): Promise<void> {
   await AsyncStorage.setItem(SERVER_URL_KEY, url.trim().replace(/\/+$/, ""));
 }
 
+const WORKER_ID_KEY = "@ppb/worker_id";
+
+/** Returns the worker's remembered ID, or null if none has been saved yet (Home screen, Phase 2). */
+export async function getWorkerId(): Promise<string | null> {
+  return AsyncStorage.getItem(WORKER_ID_KEY);
+}
+
+/** Persists the worker ID, trimmed, so it's remembered across launches. */
+export async function setWorkerId(id: string): Promise<void> {
+  await AsyncStorage.setItem(WORKER_ID_KEY, id.trim());
+}
+
 /** Thrown by every client function on a failed request. `status` is 0 for client-side/network failures. */
 export class ApiError extends Error {
   status: number;
