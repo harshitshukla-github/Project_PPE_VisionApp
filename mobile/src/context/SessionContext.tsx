@@ -13,6 +13,7 @@ import {
   setWorkerId as persistWorkerId,
 } from "../api/client";
 import type { ComplianceCheckResponse, JobsResponse } from "../api/types";
+import { addHistoryEntry, getHistory, type HistoryEntry } from "../storage/history";
 
 export type JobsStatus =
   | { kind: "loading" }
@@ -35,6 +36,9 @@ interface SessionState {
   lastCheck: ComplianceCheckResponse | null;
   lastImageUri: string | null;
   recordCheck: (result: ComplianceCheckResponse, imageUri: string) => void;
+
+  /** Past checks, most-recent-first — local on-device log (INSTRUCTIONS.md §2). */
+  history: HistoryEntry[];
 }
 
 const SessionContext = createContext<SessionState | undefined>(undefined);
@@ -52,6 +56,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [jobCategory, setJobCategory] = useState<string | null>(null);
   const [lastCheck, setLastCheck] = useState<ComplianceCheckResponse | null>(null);
   const [lastImageUri, setLastImageUri] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -59,6 +64,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (saved) setWorkerIdState(saved);
     })();
     reloadJobs();
+    (async () => {
+      setHistory(await getHistory());
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -86,6 +94,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   function recordCheck(result: ComplianceCheckResponse, imageUri: string) {
     setLastCheck(result);
     setLastImageUri(imageUri);
+    void addHistoryEntry(result, imageUri).then(setHistory);
   }
 
   return (
@@ -100,6 +109,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         lastCheck,
         lastImageUri,
         recordCheck,
+        history,
       }}
     >
       {children}
