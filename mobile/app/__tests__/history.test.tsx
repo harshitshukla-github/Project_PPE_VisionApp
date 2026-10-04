@@ -61,6 +61,19 @@ beforeEach(async () => {
 });
 
 describe("HistoryScreen", () => {
+  it("shows a loading spinner before the AsyncStorage read resolves, not the empty state", async () => {
+    renderHistory();
+
+    // historyLoaded starts false — must not claim "no checks" before we've
+    // actually finished reading AsyncStorage, even though the list is [] either way.
+    expect(
+      screen.queryByText("No checks yet — completed compliance checks will show up here."),
+    ).toBeNull();
+    expect(screen.UNSAFE_queryByType(require("react-native").ActivityIndicator)).toBeTruthy();
+
+    await screen.findByText("No checks yet — completed compliance checks will show up here.");
+  });
+
   it("shows an empty state when nothing has been checked yet", async () => {
     renderHistory();
 

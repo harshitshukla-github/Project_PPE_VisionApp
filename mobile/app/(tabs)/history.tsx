@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { useSession } from "../../src/context/SessionContext";
 import type { HistoryEntry } from "../../src/storage/history";
@@ -22,7 +22,15 @@ function titleCase(key: string): string {
  */
 export default function HistoryScreen() {
   const router = useRouter();
-  const { history } = useSession();
+  const { history, historyLoaded } = useSession();
+
+  if (!historyLoaded) {
+    return (
+      <View style={styles.empty}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
   if (history.length === 0) {
     return (

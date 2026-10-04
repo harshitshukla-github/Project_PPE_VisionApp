@@ -39,6 +39,8 @@ interface SessionState {
 
   /** Past checks, most-recent-first — local on-device log (INSTRUCTIONS.md §2). */
   history: HistoryEntry[];
+  /** False until the initial AsyncStorage read completes — lets History tell "loading" from "genuinely empty". */
+  historyLoaded: boolean;
 }
 
 const SessionContext = createContext<SessionState | undefined>(undefined);
@@ -57,6 +59,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [lastCheck, setLastCheck] = useState<ComplianceCheckResponse | null>(null);
   const [lastImageUri, setLastImageUri] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -66,6 +69,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     reloadJobs();
     (async () => {
       setHistory(await getHistory());
+      setHistoryLoaded(true);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -110,6 +114,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         lastImageUri,
         recordCheck,
         history,
+        historyLoaded,
       }}
     >
       {children}
