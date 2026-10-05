@@ -1,6 +1,6 @@
 # PPB Vision — PPE Compliance System
 
-AI detection & verification pipeline: a worker's photo goes in, a **PASS/FAIL**
+AI detection & verification pipeline: a worker's photo goes in, a **PASS / FAIL / NEEDS_REVIEW**
 PPE compliance verdict comes out — with bounding boxes, missing-equipment list,
 and a Gemini-generated explanation on failures.
 
@@ -38,7 +38,7 @@ Base URL: `http://<server>:8000/api/v1`
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| POST | `/compliance/check` | **The main endpoint.** Photo + worker + job → PASS/FAIL |
+| POST | `/compliance/check` | **The main endpoint.** Photo + worker + job → PASS / FAIL / NEEDS_REVIEW |
 | POST | `/detect` | Raw detections only (debugging / overlay drawing) |
 | GET | `/jobs` | Job categories + required PPE (populate the app's job picker) |
 | GET | `/health` | Liveness + loaded model |
@@ -64,10 +64,11 @@ Response (`200`):
   "verdict": "FAIL",
   "confidence_avg": 0.847,
   "detections": [
-    {"class": "hardhat", "confidence": 0.847, "bbox": [376.1, 110.5, 518.0, 223.5]}
+    {"class": "hardhat", "confidence": 0.847, "bbox": [376.1, 110.5, 518.0, 223.5]},
+    {"class": "no_vest", "confidence": 0.791, "bbox": [360.0, 240.0, 540.0, 620.0]}
   ],
-  "missing_equipment": ["safety_vest"],
-  "violations_detected": [],
+  "missing_equipment": [],
+  "violations_detected": ["no_vest"],
   "unverifiable_equipment": ["boots"],
   "explanation": "You're missing your safety vest ...",
   "model_used": "yolo11l",
@@ -78,8 +79,14 @@ Response (`200`):
 
 Field notes for the app:
 
-- `verdict` — `"PASS"` or `"FAIL"`. On PASS, `explanation` is `null` and
-  `gemini_invoked` is `false` (Gemini only runs on failures).
+- `verdict` — `"PASS"`, `"FAIL"`, or `"NEEDS_REVIEW"`.
+  - `FAIL` requires a **positively detected** violation class
+    (`no_hardhat` / `no_vest`) — see `violations_detected`.
+  - `NEEDS_REVIEW` means a required item simply wasn't detected. That is
+    *not* proof it is absent (`safety_vest` AP50 is 0.861, so ~1 in 7 is
+    missed), so it must never be rendered as a failure.
+  - `explanation` is non-null and `gemini_invoked` is `true` **only on
+    FAIL** — Gemini is not called for PASS or NEEDS_REVIEW.
 - `bbox` — `[x1, y1, x2, y2]` in pixels of the **uploaded** image; use with
   `/detect`'s `image_width`/`image_height` if you draw overlays.
 - `violations_detected` — explicit violation classes seen in frame

@@ -22,7 +22,7 @@ FastAPI server in `src/api/` of this repo. The mobile app is a **client only**.
 
 **What the system does:** a worker takes a selfie/photo before starting a
 job → the app sends it to the backend with their worker ID and job category
-→ the backend runs YOLO detection → returns **PASS/FAIL** with detected PPE,
+→ the backend runs YOLO detection → returns **PASS / FAIL / NEEDS_REVIEW** with detected PPE,
 missing equipment, and (on FAIL) a friendly Gemini-written explanation.
 
 ## 2. The app to build
@@ -34,13 +34,31 @@ A simple, robust compliance-check app for workers. Four screens:
    `GET /api/v1/jobs`** (never hardcode the job list).
 2. **Capture** — camera preview → take photo (or pick from gallery for
    testing). Front camera default, full-body framing hint overlay.
-3. **Result** —
-   - PASS: big green check, detected items list with confidence.
-   - FAIL: big red cross, the `explanation` text prominently, list of
+3. **Result** — three verdicts, three distinct treatments:
+   - **PASS**: big green check, detected items list with confidence.
+   - **FAIL**: big red cross, the `explanation` text prominently, list of
      `missing_equipment` and `violations_detected`, and
      `unverifiable_equipment` shown separately as "verify manually"
      (amber, NOT red — these are not failures).
+   - **NEEDS_REVIEW**: amber, **not red**. The model could not confirm one
+     or more required items — it did *not* find evidence of a violation.
+     Wording must not accuse: "Couldn't verify: safety vest — ask your
+     supervisor to confirm", never "You are missing a safety vest".
+     `explanation` is null here, so render `missing_equipment` directly.
+     Offer "Retake photo" as the primary action, since a clearer shot
+     often resolves it.
    - A "Check again" button looping back to Capture.
+
+### 3.1 Why NEEDS_REVIEW exists (read before building the Result screen)
+
+A worker *wearing* a vest was shown a red FAIL. The detector misses roughly
+one vest in seven (`safety_vest` AP50 0.861), and the backend used to treat
+"not detected" as "not worn". `FAIL` now requires the model to have
+positively detected a violation box (`no_hardhat` / `no_vest`); everything
+else uncertain is `NEEDS_REVIEW`.
+
+Rendering NEEDS_REVIEW as a failure would reintroduce the exact bug this
+change fixes. Treat it as "ask a human", not "you broke the rules".
 4. **History** — past checks stored **locally on-device** (AsyncStorage):
    timestamp, job, verdict. No backend persistence exists yet — do not
    invent endpoints for it.
@@ -98,9 +116,12 @@ Response `200`:
 ```
 
 Semantics the UI must respect:
-- `verdict` is `"PASS"` or `"FAIL"` — nothing else.
-- `explanation` is **null on PASS**; only FAIL has text (may take 1–3 s
-  extra because Gemini is called — show a loading state).
+- `verdict` is `"PASS"`, `"FAIL"`, or `"NEEDS_REVIEW"` — nothing else.
+  **⚠️ BREAKING CHANGE (2026-10-05):** `NEEDS_REVIEW` is new. Clients built
+  against the old two-value contract will fall through both branches and
+  render nothing. See §3.1 below.
+- `explanation` is **null on PASS and on NEEDS_REVIEW**; only FAIL has text
+  (may take 1–3 s extra because Gemini is called — show a loading state).
 - `unverifiable_equipment` = required by the job but the model can't see it
   yet → **amber "verify manually"**, never counted as failure.
 - `bbox` = `[x1, y1, x2, y2]` in pixels of the uploaded image.

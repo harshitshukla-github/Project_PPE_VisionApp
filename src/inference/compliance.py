@@ -1,19 +1,32 @@
 """PPE compliance verification against the Job PPE Matrix.
 
 Takes raw detections from :class:`~src.inference.detector.PPEDetector` and
-a job category, returns a PASS/FAIL verdict with the reasoning fields the
-API response needs.
+a job category, returns a verdict with the reasoning fields the API needs.
 
-Verdict logic:
+Verdict logic — three states, in priority order:
 
-1. Every class in the job's ``required`` list must be detected → otherwise
-   it goes to ``missing_equipment``.
-2. Any explicit violation detection (``no_hardhat``, ``no_vest``) fails the
-   check even if the corresponding positive class was also detected — the
-   violation box means at least one visible person lacks the item.
-3. Classes in the job's ``pending`` list are never scored (the model has no
-   training data for them); they are surfaced as ``unverifiable_equipment``
-   so the site supervisor knows to check manually.
+1. **FAIL** — an explicit violation class (``no_hardhat``, ``no_vest``) was
+   detected for an item this job requires. This holds even if the positive
+   class was also detected: the violation box means at least one visible
+   person lacks the item.
+2. **NEEDS_REVIEW** — no violation was detected, but a required class was
+   not found either. The model cannot confirm compliance *or* non-compliance,
+   so a human decides.
+3. **PASS** — every required class detected, no violations.
+
+Classes in the job's ``pending`` list are never scored (the model has no
+training data for them); they surface as ``unverifiable_equipment``.
+
+Why NEEDS_REVIEW exists:
+    Absence of a detection is not evidence of absence. ``safety_vest`` scores
+    AP50 0.861, so roughly one vest in seven is missed — and before this
+    state existed every one of those misses produced a confident ``FAIL``,
+    telling a compliant worker they were in violation and logging it against
+    them. ``FAIL`` now requires the model to have positively seen something
+    wrong. The cost is that genuine violations the model under-detects land
+    in ``NEEDS_REVIEW`` rather than ``FAIL`` — deliberate, because a missed
+    violation gets caught by the human reviewing the queue, whereas a false
+    accusation erodes trust in the whole system.
 
 Usage::
 
@@ -114,7 +127,18 @@ def check_compliance(
         v for v in VIOLATION_TO_ITEM
         if v in detected_classes and VIOLATION_TO_ITEM[v] in requirements.required
     ]
-    verdict = Verdict.PASS if not missing and not violations else Verdict.FAIL
+
+    # A violation class is affirmative evidence: the model positively located a
+    # bare head or an uncovered torso. Absence of a required item is not — the
+    # detector simply may not have found it. Those two cases used to collapse
+    # into FAIL, which is how a worker wearing a vest got told they were
+    # non-compliant. They are now distinct outcomes.
+    if violations:
+        verdict = Verdict.FAIL
+    elif missing:
+        verdict = Verdict.NEEDS_REVIEW
+    else:
+        verdict = Verdict.PASS
 
     confidence_avg = (
         round(sum(d.confidence for d in detections) / len(detections), 4)

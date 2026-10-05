@@ -174,7 +174,18 @@ async def compliance_check(
     detector: PPEDetector = Depends(get_detector),
 ) -> ComplianceResponse:
     """Full compliance check: detect → verify against Job PPE Matrix →
-    Gemini explanation on FAIL (PASS responses never invoke Gemini)."""
+    Gemini explanation on FAIL.
+
+    Returns one of three verdicts: ``PASS``, ``FAIL`` (a violation class was
+    positively detected), or ``NEEDS_REVIEW`` (a required item was not found,
+    but nothing affirmatively indicates a violation — a human decides).
+
+    Gemini is invoked **only** on ``FAIL``. ``NEEDS_REVIEW`` deliberately does
+    not call it: the model has no finding to explain, an explanation would
+    read as an accusation the evidence doesn't support, and these cases are
+    more frequent than FAIL used to be, so calling Gemini would raise cost
+    rather than lower it.
+    """
     try:
         load_job_matrix()[job_category]
     except KeyError:

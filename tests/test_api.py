@@ -96,13 +96,35 @@ class TestComplianceCheck:
     def test_fail_verdict_includes_explanation(
         self, api_client, fake_detector, sample_image_bytes
     ) -> None:
-        fake_detector.detections = [make_detection("hardhat", 0.85)]
+        """FAIL needs a violation box, so Gemini explains a real finding."""
+        fake_detector.detections = [
+            make_detection("hardhat", 0.85),
+            make_detection("no_vest", 0.79),
+        ]
         response = self._check(api_client, sample_image_bytes)
         body = response.json()
         assert body["verdict"] == "FAIL"
-        assert body["missing_equipment"] == ["safety_vest"]
+        assert body["violations_detected"] == ["no_vest"]
         assert body["gemini_invoked"] is True
         assert body["explanation"]  # fallback text present
+
+    def test_undetected_item_is_review_and_skips_gemini(
+        self, api_client, fake_detector, sample_image_bytes
+    ) -> None:
+        """A merely-undetected vest must not accuse, and must not spend money.
+
+        This is the reported defect: the worker was wearing a vest the model
+        missed. It is now NEEDS_REVIEW, and Gemini is not called — there is no
+        finding to explain, and these are far more common than FAIL.
+        """
+        fake_detector.detections = [make_detection("hardhat", 0.85)]
+        response = self._check(api_client, sample_image_bytes)
+        body = response.json()
+        assert body["verdict"] == "NEEDS_REVIEW"
+        assert body["missing_equipment"] == ["safety_vest"]
+        assert body["violations_detected"] == []
+        assert body["gemini_invoked"] is False
+        assert body["explanation"] is None
 
     def test_violation_detection_fails_worker(
         self, api_client, fake_detector, sample_image_bytes

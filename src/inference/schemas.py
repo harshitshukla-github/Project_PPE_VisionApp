@@ -14,10 +14,19 @@ from pydantic import BaseModel, Field
 
 
 class Verdict(str, Enum):
-    """Overall compliance outcome."""
+    """Overall compliance outcome.
+
+    ``FAIL`` requires *affirmative* evidence of a violation — a ``no_hardhat``
+    or ``no_vest`` detection. Merely failing to detect a required item is not
+    proof the worker lacks it; the detector misses roughly one vest in seven
+    even after the co-occurrence retrain (safety_vest AP50 0.861). Reporting
+    those as ``FAIL`` accuses compliant workers, which is the defect this
+    third state exists to prevent.
+    """
 
     PASS = "PASS"
     FAIL = "FAIL"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
 
 
 class Detection(BaseModel):
