@@ -80,13 +80,20 @@ Response (`200`):
 Field notes for the app:
 
 - `verdict` — `"PASS"`, `"FAIL"`, or `"NEEDS_REVIEW"`.
-  - `FAIL` requires a **positively detected** violation class
-    (`no_hardhat` / `no_vest`) — see `violations_detected`.
-  - `NEEDS_REVIEW` means a required item simply wasn't detected. That is
-    *not* proof it is absent (`safety_vest` AP50 is 0.861, so ~1 in 7 is
-    missed), so it must never be rendered as a failure.
-  - `explanation` is non-null and `gemini_invoked` is `true` **only on
-    FAIL** — Gemini is not called for PASS or NEEDS_REVIEW.
+  - `FAIL` requires **positive evidence** of a breach: a violation class
+    detected by YOLO (`violations_detected`), or an item Gemini saw was not
+    worn (`missing_equipment`).
+  - When YOLO cannot find a required item, the photo goes to Gemini for a
+    second opinion on those items only. That usually settles the check as
+    `PASS` or `FAIL`.
+  - `NEEDS_REVIEW` is what is left when neither model could judge an item,
+    or Gemini was unavailable. It must never be rendered as a failure.
+  - `verdict_source` is `"detector"` or `"detector+gemini"`; `verification`
+    holds Gemini's per-item `status`, `confidence` and one-line `reason`.
+  - `explanation` is non-null only on FAIL.
+  - Set `PPB_GEMINI_VERIFY=false` to switch the second opinion off. It sends
+    the worker's photo to Google, and adds roughly 3–8 s to checks that
+    need it.
 - `bbox` — `[x1, y1, x2, y2]` in pixels of the **uploaded** image; use with
   `/detect`'s `image_width`/`image_height` if you draw overlays.
 - `violations_detected` — explicit violation classes seen in frame

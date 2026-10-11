@@ -6,10 +6,11 @@ import pytest
 
 from src.inference.compliance import (
     VIOLATION_TO_ITEM,
+    apply_verification,
     check_compliance,
     load_job_matrix,
 )
-from src.inference.schemas import Verdict
+from src.inference.schemas import GeminiVerification, ItemStatus, ItemVerification, Verdict
 from tests.conftest import make_detection
 
 
@@ -139,3 +140,111 @@ class TestViolationMapping:
             "no_hardhat": "hardhat",
             "no_vest": "safety_vest",
         }
+
+
+def _verification(**statuses: tuple[str, float]) -> GeminiVerification:
+    """Build Gemini findings from item=(status, confidence) pairs."""
+    return GeminiVerification(
+        model="gemini-test",
+        elapsed_ms=1.0,
+        items=[
+            ItemVerification(item=item, status=ItemStatus(status), confidence=conf)
+            for item, (status, conf) in statuses.items()
+        ],
+    )
+
+
+class TestGeminiResolution:
+    """How Gemini's look at the photo settles a NEEDS_REVIEW."""
+
+    def _review(self, job: str = "general_labor", detected: tuple[str, ...] = ("hardhat",)):
+        result = check_compliance([make_detection(c) for c in detected], job)
+        assert result.verdict is Verdict.NEEDS_REVIEW
+        return result
+
+    def test_vest_confirmed_worn_becomes_pass(self) -> None:
+        """The original bug report, fully resolved: detector missed it, Gemini saw it."""
+        resolved = apply_verification(
+            self._review(), _verification(safety_vest=("worn", 0.95)), 0.75
+        )
+        assert resolved.verdict is Verdict.PASS
+        assert resolved.missing_equipment == []
+        assert resolved.verdict_source == "detector+gemini"
+
+    def test_vest_confirmed_absent_becomes_fail(self) -> None:
+        resolved = apply_verification(
+            self._review(), _verification(safety_vest=("not_worn", 0.9)), 0.75
+        )
+        assert resolved.verdict is Verdict.FAIL
+        assert resolved.missing_equipment == ["safety_vest"]
+        assert resolved.verdict_source == "detector+gemini"
+
+    def test_uncertain_stays_review(self) -> None:
+        resolved = apply_verification(
+            self._review(), _verification(safety_vest=("uncertain", 0.9)), 0.75
+        )
+        assert resolved.verdict is Verdict.NEEDS_REVIEW
+        assert resolved.missing_equipment == ["safety_vest"]
+        assert resolved.verdict_source == "detector"
+
+    @pytest.mark.parametrize("status", ["worn", "not_worn"])
+    def test_low_confidence_answer_changes_nothing(self, status: str) -> None:
+        """A hesitant Gemini can neither clear a worker nor accuse one."""
+        resolved = apply_verification(
+            self._review(), _verification(safety_vest=(status, 0.6)), 0.75
+        )
+        assert resolved.verdict is Verdict.NEEDS_REVIEW
+
+    def test_confidence_exactly_at_threshold_counts(self) -> None:
+        resolved = apply_verification(
+            self._review(), _verification(safety_vest=("worn", 0.75)), 0.75
+        )
+        assert resolved.verdict is Verdict.PASS
+
+    def test_item_gemini_did_not_report_stays_unknown(self) -> None:
+        review = self._review("welder", ("hardhat", "safety_vest"))
+        resolved = apply_verification(review, _verification(goggles=("worn", 0.9)), 0.75)
+        assert resolved.verdict is Verdict.NEEDS_REVIEW
+        assert resolved.missing_equipment == ["gloves"]
+        assert resolved.verdict_source == "detector+gemini"  # the list did shrink
+
+    def test_one_not_worn_fails_and_unknowns_are_not_blamed(self) -> None:
+        """Only what was seen to be missing is reported as missing."""
+        review = self._review("welder", ("hardhat", "safety_vest"))
+        resolved = apply_verification(
+            review,
+            _verification(goggles=("not_worn", 0.9), gloves=("uncertain", 0.5)),
+            0.75,
+        )
+        assert resolved.verdict is Verdict.FAIL
+        assert resolved.missing_equipment == ["goggles"]
+        assert "gloves" in resolved.unverifiable_equipment
+
+    def test_all_items_worn_passes_multi_item_job(self) -> None:
+        review = self._review("welder", ("hardhat", "safety_vest"))
+        resolved = apply_verification(
+            review, _verification(goggles=("worn", 0.9), gloves=("worn", 0.85)), 0.75
+        )
+        assert resolved.verdict is Verdict.PASS
+
+    def test_no_verification_leaves_result_untouched(self) -> None:
+        review = self._review()
+        assert apply_verification(review, None) is review
+
+    def test_detector_fail_is_never_overturned(self) -> None:
+        """Gemini is a second opinion on doubt, not an appeal against a violation box."""
+        fail = check_compliance(
+            [make_detection("hardhat"), make_detection("no_vest")], "general_labor"
+        )
+        assert fail.verdict is Verdict.FAIL
+        assert apply_verification(fail, _verification(safety_vest=("worn", 1.0)), 0.75) is fail
+
+    def test_detector_pass_is_never_overturned(self, compliant_detections) -> None:
+        ok = check_compliance(compliant_detections, "general_labor")
+        assert apply_verification(ok, _verification(safety_vest=("not_worn", 1.0)), 0.75) is ok
+
+    def test_original_result_is_not_mutated(self) -> None:
+        review = self._review()
+        apply_verification(review, _verification(safety_vest=("worn", 0.95)), 0.75)
+        assert review.verdict is Verdict.NEEDS_REVIEW
+        assert review.missing_equipment == ["safety_vest"]

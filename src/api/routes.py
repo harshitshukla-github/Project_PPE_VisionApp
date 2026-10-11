@@ -9,12 +9,14 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 
 from src.api.deps import get_detector
-from src.inference.compliance import check_compliance, load_job_matrix
+from src.inference.compliance import apply_verification, check_compliance, load_job_matrix
 from src.inference.detector import PPEDetector
 from src.inference.gemini_explainer import explain_failure
+from src.inference.gemini_verifier import verify_items
 from src.inference.schemas import (
     ComplianceResponse,
     DetectionResponse,
@@ -174,17 +176,21 @@ async def compliance_check(
     detector: PPEDetector = Depends(get_detector),
 ) -> ComplianceResponse:
     """Full compliance check: detect → verify against Job PPE Matrix →
-    Gemini explanation on FAIL.
+    Gemini second opinion when the detector is unsure → explanation on FAIL.
 
-    Returns one of three verdicts: ``PASS``, ``FAIL`` (a violation class was
-    positively detected), or ``NEEDS_REVIEW`` (a required item was not found,
-    but nothing affirmatively indicates a violation — a human decides).
+    1. YOLO detects, and the Job PPE Matrix gives a first verdict: ``PASS``,
+       ``FAIL`` (a violation class was positively detected) or
+       ``NEEDS_REVIEW`` (a required item was not found, which is not proof it
+       is absent).
+    2. On ``NEEDS_REVIEW`` the photo goes to Gemini, which judges each
+       undetected item as worn, not worn or uncertain. That settles the
+       verdict as ``PASS`` or ``FAIL`` where Gemini is confident, and leaves
+       ``NEEDS_REVIEW`` only for what neither model could see.
+    3. Any ``FAIL``, from either model, gets a Gemini-written explanation.
 
-    Gemini is invoked **only** on ``FAIL``. ``NEEDS_REVIEW`` deliberately does
-    not call it: the model has no finding to explain, an explanation would
-    read as an accusation the evidence doesn't support, and these cases are
-    more frequent than FAIL used to be, so calling Gemini would raise cost
-    rather than lower it.
+    This favours accuracy over cost: every check the detector cannot settle
+    costs one vision call and a few seconds. If Gemini is switched off or
+    unreachable, step 2 is skipped and the verdict stays ``NEEDS_REVIEW``.
     """
     try:
         load_job_matrix()[job_category]
@@ -199,8 +205,19 @@ async def compliance_check(
     detections, elapsed_ms = detector.detect(array)
     result = check_compliance(detections, job_category)
 
-    explanation: str | None = None
     gemini_invoked = False
+    verification = None
+    if result.verdict is Verdict.NEEDS_REVIEW:
+        # A vision call takes seconds; keep it off the event loop so other
+        # requests are not held up behind it.
+        verification = await run_in_threadpool(
+            verify_items, array, job_category, result.missing_equipment
+        )
+        if verification is not None:
+            gemini_invoked = True
+            result = apply_verification(result, verification)
+
+    explanation: str | None = None
     if result.verdict is Verdict.FAIL:
         explanation = explain_failure(
             job_category=job_category,
@@ -209,7 +226,10 @@ async def compliance_check(
         )
         gemini_invoked = True
 
-    logger.info(f"[{worker_id}] {job_category}: {result.verdict.value}")
+    logger.info(
+        f"[{worker_id}] {job_category}: {result.verdict.value} "
+        f"(decided by {result.verdict_source})"
+    )
     return ComplianceResponse(
         worker_id=worker_id,
         job_category=job_category,
@@ -220,6 +240,8 @@ async def compliance_check(
         violations_detected=result.violations_detected,
         unverifiable_equipment=result.unverifiable_equipment,
         explanation=explanation,
+        verdict_source=result.verdict_source,
+        verification=verification,
         model_used=detector.model_name,
         inference_time_ms=elapsed_ms,
         gemini_invoked=gemini_invoked,

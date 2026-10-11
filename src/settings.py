@@ -49,6 +49,19 @@ class Settings(BaseSettings):
     ppb_device: str = Field("cpu", alias="PPB_DEVICE")
     ppb_img_size: int = Field(640, alias="PPB_IMG_SIZE")
 
+    # Gemini second opinion — when the detector cannot find a required item,
+    # Gemini looks at the photo itself and decides worn / not worn / uncertain.
+    # Accuracy over cost: every NEEDS_REVIEW costs one vision call and 2-5 s.
+    # NOTE: this sends the worker's photo to Google. Turn it off where that is
+    # not acceptable; the verdict then simply stays NEEDS_REVIEW.
+    ppb_gemini_verify: bool = Field(True, alias="PPB_GEMINI_VERIFY")
+    # Gemini findings below this confidence are treated as "uncertain", so a
+    # hesitant answer can neither clear a worker nor accuse one.
+    ppb_gemini_verify_min_confidence: float = Field(
+        0.75, alias="PPB_GEMINI_VERIFY_MIN_CONFIDENCE"
+    )
+    ppb_gemini_timeout_s: float = Field(20.0, alias="PPB_GEMINI_TIMEOUT_S")
+
     # Tracking
     mlflow_tracking_uri: str = Field(
         "sqlite:///runs/mlflow.db", alias="MLFLOW_TRACKING_URI"
