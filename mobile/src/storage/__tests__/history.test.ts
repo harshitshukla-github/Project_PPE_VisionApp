@@ -45,6 +45,23 @@ describe("history storage", () => {
     expect(history[0].id).toEqual(expect.any(String));
   });
 
+  it("round-trips the Gemini second-opinion fields", async () => {
+    const result = makeResult({
+      verdict: "NEEDS_REVIEW",
+      verdict_source: "detector+gemini",
+      verification: {
+        model: "gemini-2.5-flash",
+        elapsed_ms: 3100,
+        items: [{ item: "safety_vest", status: "uncertain", confidence: 0.5, reason: "torso out of frame" }],
+      },
+    });
+    await addHistoryEntry(result, "file:///photo.jpg");
+
+    const [entry] = await getHistory();
+    expect(entry.result.verdict).toBe("NEEDS_REVIEW");
+    expect(entry.result.verification?.items[0].reason).toBe("torso out of frame");
+  });
+
   it("orders entries most-recent-first", async () => {
     await addHistoryEntry(makeResult({ worker_id: "W-0001" }), "file:///1.jpg");
     await addHistoryEntry(makeResult({ worker_id: "W-0002" }), "file:///2.jpg");

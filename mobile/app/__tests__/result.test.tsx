@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen } from "@testing-library/react-native";
 
 import ResultScreen from "../result";
 import { SessionProvider, useSession } from "../../src/context/SessionContext";
@@ -98,5 +98,38 @@ describe("ResultScreen", () => {
     expect(screen.getByText("Goggles")).toBeTruthy();
     expect(screen.getByText("Violations detected")).toBeTruthy();
     expect(screen.getByText("No Hardhat")).toBeTruthy();
+  });
+
+  it("renders NEEDS_REVIEW as a non-accusing amber state with 'Retake photo' as the action", async () => {
+    renderResult({
+      ...PASS_RESULT,
+      verdict: "NEEDS_REVIEW",
+      detections: [],
+      missing_equipment: ["safety_vest"],
+      unverifiable_equipment: [],
+      explanation: null,
+    });
+
+    expect(await screen.findByText("Needs review")).toBeTruthy();
+    expect(
+      screen.getByText("Couldn't verify: Safety Vest — ask your supervisor to confirm."),
+    ).toBeTruthy();
+    expect(screen.getByText("Retake photo")).toBeTruthy();
+    expect(screen.queryByText("Check again")).toBeNull();
+    expect(screen.queryByText("FAIL")).toBeNull();
+  });
+
+  it("keeps 'Check again' as the action for PASS and FAIL", async () => {
+    renderResult(PASS_RESULT);
+    expect(await screen.findByText("Check again")).toBeTruthy();
+    expect(screen.queryByText("Retake photo")).toBeNull();
+  });
+
+  it("loops back to Capture from 'Retake photo'", async () => {
+    renderResult({ ...PASS_RESULT, verdict: "NEEDS_REVIEW", missing_equipment: ["gloves"] });
+
+    fireEvent.press(await screen.findByText("Retake photo"));
+
+    expect(mockReplace).toHaveBeenCalledWith("/capture");
   });
 });

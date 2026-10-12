@@ -9,7 +9,12 @@ import {
   View,
 } from "react-native";
 
-import type { ComplianceCheckResponse, Detection } from "../api/types";
+import type {
+  ComplianceCheckResponse,
+  Detection,
+  ItemVerification,
+  Verdict,
+} from "../api/types";
 
 const PHOTO_HEIGHT = 360;
 /** Vertical space a bbox label needs — used to decide whether it fits above the box. */
@@ -152,34 +157,101 @@ function PhotoWithBoxes({
   );
 }
 
+type Tone = "pass" | "fail" | "review";
+
+const VERDICT_PRESENTATION: Record<Verdict, { icon: string; label: string; tone: Tone }> = {
+  PASS: { icon: "✓", label: "PASS", tone: "pass" },
+  FAIL: { icon: "✗", label: "FAIL", tone: "fail" },
+  NEEDS_REVIEW: { icon: "?", label: "Needs review", tone: "review" },
+};
+
 /**
- * Shared PASS/FAIL breakdown, used by both the Result screen (Phase 3) and
- * the History detail screen (Phase 4) so a past check renders identically
- * to a fresh one.
+ * Anything the backend sends that this build doesn't know about renders as
+ * "needs review" — amber and non-accusing — never as a red failure. That is
+ * the exact bug NEEDS_REVIEW exists to prevent (INSTRUCTIONS.md §3.1), so an
+ * unrecognised future verdict must fail safe, not fall through to FAIL.
+ */
+function presentationFor(verdict: string) {
+  return VERDICT_PRESENTATION[verdict as Verdict] ?? VERDICT_PRESENTATION.NEEDS_REVIEW;
+}
+
+/**
+ * How one Gemini finding is shown to the worker.
+ *
+ * "not_worn" is only shown as such when the backend actually turned it into a
+ * FAIL. The backend downgrades findings below its confidence threshold to
+ * "unknown" without telling us the threshold, so a low-confidence "not_worn"
+ * on a NEEDS_REVIEW result must read as "couldn't confirm" — and its reason
+ * ("no vest visible") is withheld, since it reads as an accusation the
+ * evidence doesn't support.
+ */
+function describeFinding(
+  finding: ItemVerification,
+  result: ComplianceCheckResponse,
+): { label: string; tone: Tone; reason: string } {
+  if (finding.status === "worn") {
+    return { label: "Seen", tone: "pass", reason: finding.reason };
+  }
+  if (
+    finding.status === "not_worn" &&
+    result.verdict === "FAIL" &&
+    result.missing_equipment.includes(finding.item)
+  ) {
+    return { label: "Not seen", tone: "fail", reason: finding.reason };
+  }
+  return {
+    label: "Couldn't confirm",
+    tone: "review",
+    reason: finding.status === "uncertain" ? finding.reason : "",
+  };
+}
+
+/**
+ * Shared PASS / FAIL / NEEDS_REVIEW breakdown, used by both the Result screen
+ * (Phase 3) and the History detail screen (Phase 4) so a past check renders
+ * identically to a fresh one.
  *
  * PASS: green check + detections. FAIL: red cross + explanation +
- * missing/violations. unverifiable_equipment always renders separately in
- * amber "verify manually" — it is never a failure (INSTRUCTIONS.md §2, §4).
+ * missing/violations. NEEDS_REVIEW: amber, non-accusing — "couldn't verify X,
+ * ask your supervisor" — because nothing was seen to be wrong.
+ * unverifiable_equipment always renders separately in amber "verify
+ * manually" — it is never a failure (INSTRUCTIONS.md §2, §3.1, §4).
  */
 export default function CheckResultView({ result, imageUri }: CheckResultViewProps) {
-  const isPass = result.verdict === "PASS";
+  const presentation = presentationFor(result.verdict);
+  const toneStyle = TONE_STYLE[presentation.tone];
+  const isFail = presentation.tone === "fail";
+  const isReview = presentation.tone === "review";
+  const findings = result.verification?.items ?? [];
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       {imageUri && <PhotoWithBoxes imageUri={imageUri} detections={result.detections} />}
 
       <View style={styles.verdictRow}>
-        <Text style={[styles.verdictIcon, isPass ? styles.passColor : styles.failColor]}>
-          {isPass ? "✓" : "✗"}
-        </Text>
-        <Text style={[styles.verdictText, isPass ? styles.passColor : styles.failColor]}>
-          {result.verdict}
-        </Text>
+        <Text style={[styles.verdictIcon, toneStyle]}>{presentation.icon}</Text>
+        <Text style={[styles.verdictText, toneStyle]}>{presentation.label}</Text>
+        {result.verdict_source === "detector+gemini" && (
+          <Text style={styles.sourceHint}>Double-checked with a closer look at the photo.</Text>
+        )}
       </View>
 
-      {!isPass && result.explanation && (
+      {isFail && result.explanation && (
         <View style={styles.section}>
           <Text style={styles.explanation}>{result.explanation}</Text>
+        </View>
+      )}
+
+      {isReview && (
+        <View style={styles.section}>
+          <Text style={styles.reviewMessage}>
+            {result.missing_equipment.length > 0
+              ? `Couldn't verify: ${result.missing_equipment.map(titleCase).join(", ")} — ask your supervisor to confirm.`
+              : "We couldn't verify this photo — ask your supervisor to confirm."}
+          </Text>
+          <Text style={styles.reviewHint}>
+            A clearer, full-body photo in good light often settles it.
+          </Text>
         </View>
       )}
 
@@ -194,7 +266,10 @@ export default function CheckResultView({ result, imageUri }: CheckResultViewPro
         </View>
       )}
 
-      {result.missing_equipment.length > 0 && (
+      {/* On NEEDS_REVIEW these are items nobody could confirm, already named in
+          the message above — listing them again as "Missing equipment" in red
+          would accuse. They only get this section when confirmed not worn. */}
+      {isFail && result.missing_equipment.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Missing equipment</Text>
           {result.missing_equipment.map((item) => (
@@ -224,6 +299,25 @@ export default function CheckResultView({ result, imageUri }: CheckResultViewPro
               {titleCase(item)}
             </Text>
           ))}
+        </View>
+      )}
+
+      {findings.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>What we checked</Text>
+          {findings.map((finding) => {
+            const described = describeFinding(finding, result);
+            return (
+              <View key={finding.item} style={styles.finding}>
+                <Text style={[styles.listItem, TONE_STYLE[described.tone]]}>
+                  {titleCase(finding.item)} — {described.label}
+                </Text>
+                {described.reason !== "" && (
+                  <Text style={styles.findingReason}>{described.reason}</Text>
+                )}
+              </View>
+            );
+          })}
         </View>
       )}
     </ScrollView>
@@ -307,7 +401,40 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
   },
+  sourceHint: {
+    color: "#777",
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 2,
+  },
+  // Darker than amberColor: this is body text, and #b8860b is too faint on the
+  // screen's light-gray background to read comfortably at this size.
+  reviewMessage: {
+    color: "#8a6100",
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "500",
+  },
+  reviewHint: {
+    color: "#666",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  finding: {
+    gap: 1,
+  },
+  findingReason: {
+    color: "#666",
+    fontSize: 12,
+    lineHeight: 16,
+  },
   listItem: {
     fontSize: 14,
   },
 });
+
+const TONE_STYLE: Record<Tone, object> = {
+  pass: styles.passColor,
+  fail: styles.failColor,
+  review: styles.amberColor,
+};

@@ -107,7 +107,11 @@ export interface ComplianceCheckParams {
   jobCategory: string;
 }
 
-/** POST /api/v1/compliance/check — the core PASS/FAIL request. */
+/**
+ * POST /api/v1/compliance/check — the core request. Resolves to PASS, FAIL,
+ * or NEEDS_REVIEW; the backend may spend several seconds on a Gemini second
+ * opinion before answering, and there is deliberately no client-side timeout.
+ */
 export async function postComplianceCheck(
   params: ComplianceCheckParams,
 ): Promise<ComplianceCheckResponse> {

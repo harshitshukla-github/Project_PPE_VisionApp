@@ -59,6 +59,49 @@ describe("HistoryDetailScreen", () => {
     expect(await screen.findByText("Not found")).toBeTruthy();
   });
 
+  it("renders a stored NEEDS_REVIEW entry with Gemini's findings", async () => {
+    const [entry] = await addHistoryEntry(
+      {
+        ...FAIL_RESULT,
+        verdict: "NEEDS_REVIEW",
+        missing_equipment: ["goggles"],
+        violations_detected: [],
+        unverifiable_equipment: [],
+        explanation: null,
+        verdict_source: "detector+gemini",
+        verification: {
+          model: "gemini-2.5-flash",
+          elapsed_ms: 3100,
+          items: [
+            { item: "goggles", status: "uncertain", confidence: 0.4, reason: "eyes are out of frame" },
+          ],
+        },
+      },
+      "file:///photo.jpg",
+    );
+    mockParams = { id: entry.id };
+
+    renderDetail();
+
+    expect(await screen.findByText("Needs review")).toBeTruthy();
+    expect(
+      screen.getByText("Couldn't verify: Goggles — ask your supervisor to confirm."),
+    ).toBeTruthy();
+    expect(screen.getByText("eyes are out of frame")).toBeTruthy();
+    expect(screen.queryByText("FAIL")).toBeNull();
+  });
+
+  it("still renders an entry saved before verdict_source/verification existed", async () => {
+    // FAIL_RESULT carries neither field — exactly what pre-upgrade history looks like.
+    const [entry] = await addHistoryEntry(FAIL_RESULT, "file:///legacy.jpg");
+    mockParams = { id: entry.id };
+
+    renderDetail();
+
+    expect(await screen.findByText("FAIL")).toBeTruthy();
+    expect(screen.queryByText("What we checked")).toBeNull();
+  });
+
   it("renders the matching entry's full check result", async () => {
     const [entry] = await addHistoryEntry(FAIL_RESULT, "file:///photo.jpg");
     mockParams = { id: entry.id };

@@ -28,12 +28,18 @@ export default function ResultScreen() {
     );
   }
 
+  // On PASS/FAIL the loop is "check again". On NEEDS_REVIEW a clearer shot is
+  // the way to resolve it, so that's the primary action (INSTRUCTIONS.md §2).
+  const actionLabel = lastCheck.verdict === "PASS" || lastCheck.verdict === "FAIL"
+    ? "Check again"
+    : "Retake photo";
+
   return (
     <View style={styles.screen}>
       <CheckResultView result={lastCheck} imageUri={lastImageUri} />
       <View style={styles.footer}>
         <Pressable style={styles.button} onPress={() => router.replace("/capture")}>
-          <Text style={styles.buttonText}>Check again</Text>
+          <Text style={styles.buttonText}>{actionLabel}</Text>
         </Pressable>
       </View>
     </View>

@@ -7,7 +7,35 @@
  * see the GET /jobs note below).
  */
 
-export type Verdict = "PASS" | "FAIL";
+/**
+ * "FAIL" requires positive evidence of a breach. "NEEDS_REVIEW" means neither
+ * the detector nor Gemini could confirm a required item and nothing was seen
+ * to be wrong — it must never be rendered as a failure (INSTRUCTIONS.md §3.1).
+ */
+export type Verdict = "PASS" | "FAIL" | "NEEDS_REVIEW";
+
+/** Who settled the verdict: YOLO alone, or YOLO plus Gemini's look at the photo. */
+export type VerdictSource = "detector" | "detector+gemini";
+
+/** Gemini's finding for one required item the detector did not find. */
+export type ItemStatus = "worn" | "not_worn" | "uncertain";
+
+export interface ItemVerification {
+  /** PPE class name, e.g. "safety_vest". */
+  item: string;
+  status: ItemStatus;
+  /** Verifier's own confidence, 0..1. */
+  confidence: number;
+  /** One short sentence of visual evidence, e.g. "orange hi-vis vest on torso". */
+  reason: string;
+}
+
+/** Second-opinion check of the photo — present only when Gemini actually looked. */
+export interface GeminiVerification {
+  model: string;
+  items: ItemVerification[];
+  elapsed_ms: number;
+}
 
 export interface Detection {
   /** PPE class name, e.g. "hardhat", "no_hardhat". */
@@ -28,17 +56,29 @@ export interface ComplianceCheckResponse {
   /** Mean confidence across all detections (0 if none). */
   confidence_avg: number;
   detections: Detection[];
-  /** Required PPE classes not detected on the worker. */
+  /**
+   * On FAIL: required items confirmed not worn. On NEEDS_REVIEW: required
+   * items neither the detector nor Gemini could confirm — "couldn't verify",
+   * NOT "missing".
+   */
   missing_equipment: string[];
   /** Explicit violation classes detected (e.g. "no_hardhat"). */
   violations_detected: string[];
   /**
-   * PPE required by the job but not yet detectable by the model.
+   * Required items that could not be checked from this photo (no training
+   * data for the class, or Gemini couldn't see it clearly).
    * Render as amber "verify manually" — never as a failure.
    */
   unverifiable_equipment: string[];
   /** Gemini-generated explanation. Present ONLY on FAIL, else null. */
   explanation: string | null;
+  /**
+   * Who decided. Optional because History entries saved before this field
+   * existed, and responses from an older backend, don't carry it.
+   */
+  verdict_source?: VerdictSource;
+  /** Gemini's per-item findings; null unless it looked at the photo. Absent on legacy entries. */
+  verification?: GeminiVerification | null;
   model_used: string;
   inference_time_ms: number;
   gemini_invoked: boolean;

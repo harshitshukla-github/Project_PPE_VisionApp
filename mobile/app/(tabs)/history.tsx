@@ -55,8 +55,17 @@ export default function HistoryScreen() {
   );
 }
 
+/**
+ * PASS and FAIL keep their colors; everything else — NEEDS_REVIEW, or a
+ * verdict this build has never heard of — is amber "REVIEW". Logging an
+ * unconfirmed check as a red FAIL would accuse the worker on the record,
+ * which is the bug NEEDS_REVIEW exists to prevent.
+ */
 function HistoryRow({ entry, onPress }: { entry: HistoryEntry; onPress: () => void }) {
-  const isPass = entry.result.verdict === "PASS";
+  const verdict = entry.result.verdict;
+  const label = verdict === "PASS" ? "PASS" : verdict === "FAIL" ? "FAIL" : "REVIEW";
+  const color =
+    verdict === "PASS" ? styles.passColor : verdict === "FAIL" ? styles.failColor : styles.reviewColor;
   const when = new Date(entry.result.timestamp).toLocaleString();
 
   return (
@@ -67,9 +76,7 @@ function HistoryRow({ entry, onPress }: { entry: HistoryEntry; onPress: () => vo
           {entry.result.worker_id} · {when}
         </Text>
       </View>
-      <Text style={[styles.verdict, isPass ? styles.passColor : styles.failColor]}>
-        {isPass ? "PASS" : "FAIL"}
-      </Text>
+      <Text style={[styles.verdict, color]}>{label}</Text>
     </Pressable>
   );
 }
@@ -126,5 +133,8 @@ const styles = StyleSheet.create({
   },
   failColor: {
     color: "#c0392b",
+  },
+  reviewColor: {
+    color: "#8a6100",
   },
 });

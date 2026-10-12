@@ -96,6 +96,31 @@ describe("HistoryScreen", () => {
     expect(screen.getByText(/W-0042/)).toBeTruthy();
   });
 
+  it("logs a NEEDS_REVIEW check as amber REVIEW, never as a red FAIL", async () => {
+    await addHistoryEntry(
+      { ...PASS_RESULT, verdict: "NEEDS_REVIEW", missing_equipment: ["safety_vest"] },
+      "file:///review.jpg",
+    );
+
+    renderHistory();
+
+    const label = await screen.findByText("REVIEW");
+    expect(label).toHaveStyle({ color: "#8a6100" });
+    expect(screen.queryByText("FAIL")).toBeNull();
+  });
+
+  it("shows PASS, FAIL and REVIEW rows side by side with their own colors", async () => {
+    await addHistoryEntry(PASS_RESULT, "file:///1.jpg");
+    await addHistoryEntry(FAIL_RESULT, "file:///2.jpg");
+    await addHistoryEntry({ ...PASS_RESULT, verdict: "NEEDS_REVIEW" }, "file:///3.jpg");
+
+    renderHistory();
+
+    expect(await screen.findByText("PASS")).toHaveStyle({ color: "#1a7f37" });
+    expect(screen.getByText("FAIL")).toHaveStyle({ color: "#c0392b" });
+    expect(screen.getByText("REVIEW")).toHaveStyle({ color: "#8a6100" });
+  });
+
   it("navigates to the detail route with the entry's id on tap", async () => {
     const [entry] = await addHistoryEntry(PASS_RESULT, "file:///W-0042.jpg");
 
