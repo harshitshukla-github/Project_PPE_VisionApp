@@ -16,6 +16,7 @@ Usage::
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -151,11 +152,37 @@ def _load_source_classes(dataset_dir: Path) -> dict[int, str]:
     return {int(k): v for k, v in names.items()}
 
 
+def _normalize_class_name(name: str) -> str:
+    """Normalise a class name for tolerant matching.
+
+    Lowercases and collapses any run of spaces, hyphens, or underscores into a
+    single space. This makes ``Safety-Helmet``, ``safety helmet``, and
+    ``Safety_Helmet`` all equivalent.
+
+    Dataset authors spell the same class a dozen ways, and an exact-match miss
+    is silent-but-destructive here: the class is discarded, and every image
+    that contained it becomes a background image teaching the model that the
+    object is *not* there. That is strictly worse than not having the dataset.
+
+    Args:
+        name: Raw class name from a dataset's ``data.yaml``.
+
+    Returns:
+        Normalised lookup key.
+    """
+    return re.sub(r"[\s_-]+", " ", str(name).strip().lower())
+
+
 def _build_id_map(
     source_classes: dict[int, str],
     class_map: dict[str, int | None],
 ) -> dict[int, int | None]:
     """Build a source_class_id → target_class_id mapping.
+
+    Matching is exact first, then falls back to a normalised comparison
+    (case-, hyphen-, and underscore-insensitive). The exact pass runs first so
+    existing behaviour is preserved verbatim; normalisation only rescues names
+    that would otherwise be discarded.
 
     Args:
         source_classes: Source dataset class IDs and names.
@@ -164,16 +191,90 @@ def _build_id_map(
     Returns:
         Mapping of source ID → target ID (None means discard).
     """
+    normalized: dict[str, int | None] = {}
+    for key, target in class_map.items():
+        norm_key = _normalize_class_name(key)
+        if norm_key in normalized and normalized[norm_key] != target:
+            logger.warning(
+                f"  Class map ambiguity: '{key}' normalises to '{norm_key}', "
+                f"which already maps to {normalized[norm_key]} (not {target}). "
+                "Keeping the first mapping."
+            )
+            continue
+        normalized[norm_key] = target
+
     id_map: dict[int, int | None] = {}
     for src_id, src_name in source_classes.items():
         if src_name in class_map:
             id_map[src_id] = class_map[src_name]
-        else:
-            logger.warning(
-                f"  Source class '{src_name}' (id={src_id}) not in class map → discarding"
+            continue
+
+        norm_name = _normalize_class_name(src_name)
+        if norm_name in normalized:
+            id_map[src_id] = normalized[norm_name]
+            logger.info(
+                f"  Source class '{src_name}' (id={src_id}) matched as "
+                f"'{norm_name}' → {normalized[norm_name]}"
             )
-            id_map[src_id] = None
+            continue
+
+        logger.warning(
+            f"  Source class '{src_name}' (id={src_id}) not in class map → discarding. "
+            f"Add '{norm_name}' to the class map if this class is wanted."
+        )
+        id_map[src_id] = None
     return id_map
+
+
+def polygon_to_bbox(coords: list[float]) -> list[float]:
+    """Convert a YOLO segmentation polygon to a normalised bounding box.
+
+    Args:
+        coords: Flat ``[x1, y1, x2, y2, ...]`` normalised polygon points.
+
+    Returns:
+        ``[cx, cy, w, h]`` clamped to ``[0, 1]``.
+    """
+    xs = coords[0::2]
+    ys = coords[1::2]
+    x_min, x_max = max(0.0, min(xs)), min(1.0, max(xs))
+    y_min, y_max = max(0.0, min(ys)), min(1.0, max(ys))
+    return [
+        (x_min + x_max) / 2,
+        (y_min + y_max) / 2,
+        x_max - x_min,
+        y_max - y_min,
+    ]
+
+
+def normalise_label_line(parts: list[str]) -> list[str] | None:
+    """Normalise one annotation row to detection format ``class cx cy w h``.
+
+    Some sources ship segmentation polygons (``class x1 y1 x2 y2 ...``) mixed
+    into otherwise box-shaped label files. Ultralytics decides a file is
+    segmentation if *any* row has more than 6 fields, and then reinterprets
+    the 5-field box rows in that same file as 2-point polygons — silently
+    producing garbage boxes. Converting polygons to boxes here keeps every
+    file uniformly 5-field, so that ambiguity never arises.
+
+    Args:
+        parts: Whitespace-split fields of one annotation line.
+
+    Returns:
+        A 5-element ``[class, cx, cy, w, h]`` list, or None if the row is
+        malformed beyond repair.
+    """
+    if len(parts) == 5:
+        return parts
+    # A polygon needs a class plus at least 3 (x, y) points.
+    if len(parts) >= 7 and len(parts) % 2 == 1:
+        try:
+            coords = [float(v) for v in parts[1:]]
+        except ValueError:
+            return None
+        box = polygon_to_bbox(coords)
+        return [parts[0], *(f"{v:.6f}" for v in box)]
+    return None
 
 
 def _remap_annotation_file(
@@ -211,8 +312,18 @@ def _remap_annotation_file(
                 discarded += 1
                 continue
 
-            parts[0] = str(target_id)
-            output_lines.append(" ".join(parts))
+            # Collapse segmentation polygons to boxes so every row is 5-field.
+            normalised = normalise_label_line(parts)
+            if normalised is None:
+                logger.warning(
+                    f"  Unparseable annotation in {src_txt.name} "
+                    f"({len(parts)} fields) → discarding"
+                )
+                discarded += 1
+                continue
+
+            normalised[0] = str(target_id)
+            output_lines.append(" ".join(normalised))
             kept += 1
 
     with open(_safe(dst_txt), "w") as f:
@@ -324,14 +435,23 @@ def remap_all(dataset_keys: list[str] | None = None) -> None:
     class_maps = _load_class_maps()
     keys = dataset_keys or list(class_maps.keys())
 
-    # Skip datasets that were never downloaded (raw dir missing or empty)
+    # A dataset is ready only if its data.yaml has been extracted. A directory
+    # holding just a partially-downloaded roboflow.zip is non-empty but not yet
+    # remappable, so "non-empty" is too weak a check to distinguish "still
+    # downloading" from "ready".
     available = []
     for key in keys:
         raw_dir = settings.data_raw_dir / key
-        if raw_dir.exists() and any(raw_dir.iterdir()):
-            available.append(key)
-        else:
+        if not raw_dir.exists() or not any(raw_dir.iterdir()):
             logger.warning(f"[{key}] Raw directory empty or missing — skipping remap.")
+            continue
+        if not (_find_dataset_root(raw_dir) / "data.yaml").exists():
+            logger.warning(
+                f"[{key}] No data.yaml yet — the download may still be running or "
+                "the archive was never extracted. Skipping remap."
+            )
+            continue
+        available.append(key)
 
     if not available:
         logger.error("No downloaded datasets found. Run `data download` first.")
@@ -339,19 +459,30 @@ def remap_all(dataset_keys: list[str] | None = None) -> None:
 
     logger.info(f"Remapping {len(available)} dataset(s): {available}")
     total_stats: dict[str, int] = {"images": 0, "kept": 0, "discarded": 0, "background": 0}
+    failed: list[str] = []
 
     for key in available:
-        stats = remap_dataset(key, class_maps)
+        # One broken dataset must not discard the work done on the others —
+        # these runs take tens of minutes over tens of thousands of images.
+        try:
+            stats = remap_dataset(key, class_maps)
+        except Exception as exc:  # noqa: BLE001 — isolate per-dataset failures
+            logger.error(f"[{key}] Remap failed: {exc}")
+            failed.append(key)
+            continue
         for k in total_stats:
             total_stats[k] += stats.get(k, 0)
 
     logger.info("─" * 50)
     logger.info("Remapping summary (all datasets combined):")
+    logger.info(f"  Datasets remapped      : {len(available) - len(failed)}/{len(available)}")
     logger.info(f"  Total images processed : {total_stats['images']:,}")
     logger.info(f"  Annotations kept       : {total_stats['kept']:,}")
     logger.info(f"  Annotations discarded  : {total_stats['discarded']:,}")
     logger.info(f"  Background images      : {total_stats['background']:,}")
     logger.info(f"  Output dir             : {settings.data_processed_dir.resolve()}")
+    for key in failed:
+        logger.error(f"  ✗ {key} — see the error above; re-run after fixing it.")
     logger.info("─" * 50)
 
 

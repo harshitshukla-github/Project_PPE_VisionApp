@@ -22,7 +22,7 @@ FastAPI server in `src/api/` of this repo. The mobile app is a **client only**.
 
 **What the system does:** a worker takes a selfie/photo before starting a
 job → the app sends it to the backend with their worker ID and job category
-→ the backend runs YOLO detection → returns **PASS/FAIL** with detected PPE,
+→ the backend runs YOLO detection → returns **PASS / FAIL / NEEDS_REVIEW** with detected PPE,
 missing equipment, and (on FAIL) a friendly Gemini-written explanation.
 
 ## 2. The app to build
@@ -34,13 +34,50 @@ A simple, robust compliance-check app for workers. Four screens:
    `GET /api/v1/jobs`** (never hardcode the job list).
 2. **Capture** — camera preview → take photo (or pick from gallery for
    testing). Front camera default, full-body framing hint overlay.
-3. **Result** —
-   - PASS: big green check, detected items list with confidence.
-   - FAIL: big red cross, the `explanation` text prominently, list of
+3. **Result** — three verdicts, three distinct treatments:
+   - **PASS**: big green check, detected items list with confidence.
+   - **FAIL**: big red cross, the `explanation` text prominently, list of
      `missing_equipment` and `violations_detected`, and
      `unverifiable_equipment` shown separately as "verify manually"
      (amber, NOT red — these are not failures).
+   - **NEEDS_REVIEW**: amber, **not red**. Neither the detector nor Gemini
+     could confirm one or more required items, and neither found evidence
+     of a violation. Wording must not accuse: "Couldn't verify: safety vest
+     — ask your supervisor to confirm", never "You are missing a safety
+     vest". `explanation` is null here, so render `missing_equipment`
+     directly. Offer "Retake photo" as the primary action, since a clearer
+     shot often resolves it.
    - A "Check again" button looping back to Capture.
+   - **Always show a loading state while the check runs.** When the detector
+     is unsure, the backend asks Gemini to look at the photo before it
+     answers, which adds roughly 3–8 s. The app cannot know in advance
+     which checks will take that path.
+
+### 3.1 How the verdict is reached (read before building the Result screen)
+
+A worker *wearing* a vest was once shown a red FAIL, because the backend
+treated "not detected" as "not worn". Two things changed:
+
+1. `FAIL` requires positive evidence of a breach. `NEEDS_REVIEW` covers
+   everything genuinely unknown.
+2. When the detector cannot find a required item, the backend sends the
+   photo to Gemini for a second opinion on just those items. Gemini's
+   answer usually settles it as `PASS` or `FAIL`; `NEEDS_REVIEW` is what
+   remains when Gemini could not see the item either (out of frame, too
+   dark, photo too small) or Gemini was unreachable.
+
+`verdict_source` tells you who decided: `"detector"` or
+`"detector+gemini"`. `verification.items` carries Gemini's finding and a
+one-sentence reason per item — worth showing on the Result screen ("Seen:
+orange hi-vis vest on torso"), because it tells the worker what the system
+actually looked at.
+
+Rendering NEEDS_REVIEW as a failure would reintroduce the original bug.
+Treat it as "ask a human", not "you broke the rules".
+
+**Privacy:** the second opinion sends the worker's photo to Google
+(Gemini). The first version of this API sent Gemini text only. If the app
+shows a consent or privacy notice, it needs to say so.
 4. **History** — past checks stored **locally on-device** (AsyncStorage):
    timestamp, job, verdict. No backend persistence exists yet — do not
    invent endpoints for it.
@@ -98,11 +135,23 @@ Response `200`:
 ```
 
 Semantics the UI must respect:
-- `verdict` is `"PASS"` or `"FAIL"` — nothing else.
-- `explanation` is **null on PASS**; only FAIL has text (may take 1–3 s
-  extra because Gemini is called — show a loading state).
-- `unverifiable_equipment` = required by the job but the model can't see it
-  yet → **amber "verify manually"**, never counted as failure.
+- `verdict` is `"PASS"`, `"FAIL"`, or `"NEEDS_REVIEW"` — nothing else.
+  **⚠️ BREAKING CHANGE (2026-10-05):** `NEEDS_REVIEW` is new. Clients built
+  against the old two-value contract will fall through both branches and
+  render nothing. See §3.1.
+- `explanation` is **null on PASS and on NEEDS_REVIEW**; only FAIL has text.
+- `verdict_source` is `"detector"` or `"detector+gemini"`.
+- `verification` is `null` unless Gemini looked at the photo. When present:
+  `{model, elapsed_ms, items: [{item, status, confidence, reason}]}` with
+  `status` one of `"worn"`, `"not_worn"`, `"uncertain"`.
+- `missing_equipment` — on FAIL, items confirmed not worn; on NEEDS_REVIEW,
+  items nobody could confirm.
+- `unverifiable_equipment` = required by the job but could not be checked
+  from this photo (no training data for the class, or — on a FAIL — Gemini
+  could not see it clearly) → **amber "verify manually"**, never a failure.
+- `gemini_invoked` is `true` when Gemini was called for the second opinion,
+  the explanation, or both. Response time ranges from under 1 s (detector
+  alone) to roughly 10 s (second opinion plus explanation).
 - `bbox` = `[x1, y1, x2, y2]` in pixels of the uploaded image.
 - Errors: `400` bad image, `422` invalid `job_category` (body's `detail`
   lists valid ones), network failure = server unreachable (see §5).

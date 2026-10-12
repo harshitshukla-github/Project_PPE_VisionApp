@@ -43,6 +43,10 @@ if TYPE_CHECKING:
 # Type alias for a single callback function
 _Callback = Callable[["BaseTrainer"], None]
 
+#: Module that holds ultralytics' built-in MLflow callbacks. Matched by module
+#: name so they can be stripped without importing (and thereby enabling) them.
+_ULTRALYTICS_MLFLOW_MODULE = "ultralytics.utils.callbacks.mlflow"
+
 
 # ---------------------------------------------------------------------------
 # Loguru callbacks
@@ -77,7 +81,11 @@ def _on_fit_epoch_end(trainer: "BaseTrainer") -> None:
     precision = metrics.get("metrics/precision(B)", None)
     recall = metrics.get("metrics/recall(B)", None)
 
-    parts: list[str] = [f"Epoch {epoch}/{total}"]
+    # ultralytics' final_eval() bumps trainer.epoch past the last epoch and
+    # re-fires this event with best.pt's metrics — label it as such rather
+    # than printing a nonsensical "Epoch 2/1".
+    label = "Final (best.pt)" if epoch > total else f"Epoch {epoch}/{total}"
+    parts: list[str] = [label]
     if map50 is not None:
         parts.append(f"mAP50={map50:.4f}")
     if map50_95 is not None:
@@ -163,10 +171,51 @@ def build_mlflow_callbacks(
     run_name = f"{model_name}_ppe_{int(time.time())}"
     _run: list = []  # mutable container so closures can share the run reference
 
+    def on_pretrain_routine_start(trainer: "BaseTrainer") -> None:
+        """Remove ultralytics' built-in MLflow integration from this trainer.
+
+        Ultralytics auto-registers its own MLflow callbacks whenever mlflow is
+        installed. Its ``on_pretrain_routine_end`` starts a run before our
+        ``on_train_start`` fires, which crashes ours with "Run ... is already
+        active". It also reads the tracking URI from ``os.environ`` rather than
+        ``settings``, so it would log to ``runs/mlflow`` while we log to the
+        configured store — splitting one experiment across two backends.
+
+        This event fires immediately after integrations are registered and
+        before any of them run, so stripping them here is exact. It is scoped
+        to this trainer: no global ultralytics setting is changed or persisted.
+        """
+        removed = 0
+        for event, fns in list(trainer.callbacks.items()):
+            kept = [
+                f for f in fns
+                if getattr(f, "__module__", "") != _ULTRALYTICS_MLFLOW_MODULE
+            ]
+            removed += len(fns) - len(kept)
+            trainer.callbacks[event] = kept
+        if removed:
+            logger.debug(
+                f"Disabled {removed} built-in ultralytics MLflow callback(s); "
+                "PPB callbacks own the MLflow run."
+            )
+
     def on_train_start(trainer: "BaseTrainer") -> None:
         mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
         mlflow.set_experiment("ppb-vision-ppe")
-        run = mlflow.start_run(run_name=run_name)
+
+        # Defensive: if something else still opened a run (e.g. a future
+        # ultralytics version registers its integration under a different
+        # module), attach to it rather than crashing a long training job at
+        # epoch 0.
+        active = mlflow.active_run()
+        if active is not None:
+            logger.warning(
+                f"An MLflow run ({active.info.run_id}) was already active — "
+                "attaching to it instead of starting a new one."
+            )
+            run = active
+        else:
+            run = mlflow.start_run(run_name=run_name)
         _run.append(run)
         logger.info(f"MLflow run started: {run.info.run_id} ({run_name})")
 
@@ -214,6 +263,7 @@ def build_mlflow_callbacks(
             logger.info(f"MLflow run ended: {_run[0].info.run_id}")
 
     return {
+        "on_pretrain_routine_start": on_pretrain_routine_start,
         "on_train_start": on_train_start,
         "on_fit_epoch_end": on_fit_epoch_end,
         "on_train_end": on_train_end,

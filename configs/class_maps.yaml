@@ -55,6 +55,16 @@ datasets:
     No Vest:        3
     goggles:        4   # → goggles
     Goggles:        4
+    # This dataset ships a typo'd class name. Normalisation can't rescue a
+    # misspelling, and dropping it silently cost 4,439 goggles annotations.
+    googles:        4   # (sic) typo in ppe_annotation's data.yaml
+    # Protective footwear → boots. Recovers 7,144 annotations for a class that
+    # otherwise has ZERO instances and sits in every job's `pending` list.
+    # Assumption: in a PPE dataset "shoes" means safety footwear, not
+    # street shoes. Remove this line if that turns out to be wrong.
+    shoes:          7   # → boots
+    Shoes:          7
+    safety shoes:   7
     safety glasses: 4
     mask:           5   # → mask
     Mask:           5
@@ -91,7 +101,9 @@ datasets:
     mask:            5
     Person:          11  # → person
     person:          11
-    # Discarded:
+    Gloves:          6   # → gloves (was being discarded: 18 annotations)
+    Safety Shoes:    7   # → boots   (was being discarded: 22 annotations)
+    # Discarded — site equipment and vehicles, not PPE:
     NO-Mask:         null
     Safety Cone:     null
     Machinery:       null
@@ -112,6 +124,11 @@ datasets:
     Hard Hat:            0
     hardhat:             0
     Hardhat:             0
+    # Exact spellings used by niravnaik/safety-helmet-and-reflective-jacket.
+    # Matching is case/hyphen/underscore-insensitive, so these also cover
+    # "safety helmet", "Safety_Helmet", etc.
+    Safety-Helmet:       0
+    safety helmet:       0
     no helmet:           1   # → no_hardhat
     no-helmet:           1
     No Helmet:           1
