@@ -21,7 +21,7 @@ class TestJobMatrix:
 
     def test_every_required_class_is_detectable(self) -> None:
         """Required lists must never contain classes with no training data."""
-        undetectable = {"boots", "ear_protection", "face_shield", "harness"}
+        undetectable = {"ear_protection", "face_shield", "harness"}
         for job, req in load_job_matrix().items():
             overlap = undetectable & set(req.required)
             assert not overlap, f"{job} requires undetectable classes: {overlap}"
@@ -54,7 +54,7 @@ class TestVerdicts:
         """An empty frame is unreadable, not a violation — nobody to accuse."""
         result = check_compliance([], "general_labor")
         assert result.verdict is Verdict.NEEDS_REVIEW
-        assert set(result.missing_equipment) == {"hardhat", "safety_vest"}
+        assert set(result.missing_equipment) == {"hardhat", "safety_vest", "boots"}
         assert result.confidence_avg == 0.0
 
     def test_violation_fails_even_when_item_also_detected(
@@ -84,8 +84,24 @@ class TestVerdicts:
         pytest.skip("All current jobs require safety_vest — scenario not constructible.")
 
     def test_pending_classes_reported_unverifiable(self, compliant_detections) -> None:
-        result = check_compliance(compliant_detections, "general_labor")
-        assert "boots" in result.unverifiable_equipment
+        result = check_compliance(compliant_detections, "height_work")
+        assert result.unverifiable_equipment == ["harness"]
+
+    def test_undetected_boots_is_review_not_failure(self) -> None:
+        """Boots are required now, and feet are often out of frame or missed.
+
+        boots AP50 is 0.613, so a miss is common; like any absence it must
+        send the photo for a second look, never accuse the worker.
+        """
+        dets = [make_detection("hardhat"), make_detection("safety_vest")]
+        result = check_compliance(dets, "general_labor")
+        assert result.verdict is Verdict.NEEDS_REVIEW
+        assert result.missing_equipment == ["boots"]
+
+    @pytest.mark.parametrize("job", sorted(load_job_matrix()))
+    def test_boots_are_never_left_for_manual_checking(self, job: str) -> None:
+        """Nobody works the manual list, so boots must be enforced or absent."""
+        assert "boots" not in load_job_matrix()[job].pending
 
 
 class TestThreeStateBoundary:
@@ -111,7 +127,7 @@ class TestThreeStateBoundary:
 
     def test_partial_kit_without_violation_is_review(self) -> None:
         """Welder with half the kit and no violation box ⇒ review, not fail."""
-        dets = [make_detection("hardhat"), make_detection("safety_vest")]
+        dets = [make_detection(c) for c in ("hardhat", "safety_vest", "boots")]
         result = check_compliance(dets, "welder")
         assert result.verdict is Verdict.NEEDS_REVIEW
         assert set(result.missing_equipment) == {"goggles", "gloves"}
@@ -157,7 +173,9 @@ def _verification(**statuses: tuple[str, float]) -> GeminiVerification:
 class TestGeminiResolution:
     """How Gemini's look at the photo settles a NEEDS_REVIEW."""
 
-    def _review(self, job: str = "general_labor", detected: tuple[str, ...] = ("hardhat",)):
+    def _review(
+        self, job: str = "general_labor", detected: tuple[str, ...] = ("hardhat", "boots")
+    ):
         result = check_compliance([make_detection(c) for c in detected], job)
         assert result.verdict is Verdict.NEEDS_REVIEW
         return result
@@ -202,7 +220,7 @@ class TestGeminiResolution:
         assert resolved.verdict is Verdict.PASS
 
     def test_item_gemini_did_not_report_stays_unknown(self) -> None:
-        review = self._review("welder", ("hardhat", "safety_vest"))
+        review = self._review("welder", ("hardhat", "safety_vest", "boots"))
         resolved = apply_verification(review, _verification(goggles=("worn", 0.9)), 0.75)
         assert resolved.verdict is Verdict.NEEDS_REVIEW
         assert resolved.missing_equipment == ["gloves"]
@@ -210,7 +228,7 @@ class TestGeminiResolution:
 
     def test_one_not_worn_fails_and_unknowns_are_not_blamed(self) -> None:
         """Only what was seen to be missing is reported as missing."""
-        review = self._review("welder", ("hardhat", "safety_vest"))
+        review = self._review("welder", ("hardhat", "safety_vest", "boots"))
         resolved = apply_verification(
             review,
             _verification(goggles=("not_worn", 0.9), gloves=("uncertain", 0.5)),
@@ -221,7 +239,7 @@ class TestGeminiResolution:
         assert "gloves" in resolved.unverifiable_equipment
 
     def test_all_items_worn_passes_multi_item_job(self) -> None:
-        review = self._review("welder", ("hardhat", "safety_vest"))
+        review = self._review("welder", ("hardhat", "safety_vest", "boots"))
         resolved = apply_verification(
             review, _verification(goggles=("worn", 0.9), gloves=("worn", 0.85)), 0.75
         )

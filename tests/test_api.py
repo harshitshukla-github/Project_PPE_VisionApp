@@ -39,7 +39,9 @@ class TestHealthAndInfo:
         response = api_client.get("/api/v1/jobs")
         assert response.status_code == 200
         body = response.json()
-        assert body["welder"]["required"] == ["hardhat", "safety_vest", "goggles", "gloves"]
+        assert body["welder"]["required"] == [
+            "hardhat", "safety_vest", "goggles", "gloves", "boots",
+        ]
         assert "face_shield" in body["welder"]["pending"]
 
 
@@ -85,6 +87,7 @@ class TestComplianceCheck:
         fake_detector.detections = [
             make_detection("hardhat", 0.92),
             make_detection("safety_vest", 0.88),
+            make_detection("boots", 0.8),
         ]
         response = self._check(api_client, sample_image_bytes)
         assert response.status_code == 200
@@ -93,7 +96,20 @@ class TestComplianceCheck:
         assert body["gemini_invoked"] is False
         assert body["explanation"] is None
         assert body["missing_equipment"] == []
-        assert body["unverifiable_equipment"] == ["boots"]
+        assert body["unverifiable_equipment"] == []
+
+    def test_pending_item_is_reported_unverifiable(
+        self, api_client, fake_detector, sample_image_bytes
+    ) -> None:
+        """A class with no training data is listed, never scored."""
+        fake_detector.detections = [
+            make_detection("hardhat", 0.92),
+            make_detection("safety_vest", 0.88),
+            make_detection("boots", 0.8),
+        ]
+        body = self._check(api_client, sample_image_bytes, job="height_work").json()
+        assert body["verdict"] == "PASS"
+        assert body["unverifiable_equipment"] == ["harness"]
 
     def test_fail_verdict_includes_explanation(
         self, api_client, fake_detector, sample_image_bytes
@@ -118,7 +134,9 @@ class TestComplianceCheck:
         The worker was wearing a vest the detector missed. Without a second
         opinion that stays NEEDS_REVIEW: not an accusation, not a free pass.
         """
-        fake_detector.detections = [make_detection("hardhat", 0.85)]
+        fake_detector.detections = [
+            make_detection("hardhat", 0.85), make_detection("boots", 0.8),
+        ]
         response = self._check(api_client, sample_image_bytes)
         body = response.json()
         assert body["verdict"] == "NEEDS_REVIEW"
@@ -182,7 +200,9 @@ class TestGeminiSecondOpinion:
     ) -> None:
         """The reported defect, end to end: missed by YOLO, cleared by Gemini."""
         calls = self._fake_verifier(monkeypatch, "worn")
-        fake_detector.detections = [make_detection("hardhat", 0.85)]
+        fake_detector.detections = [
+            make_detection("hardhat", 0.85), make_detection("boots", 0.8),
+        ]
         body = self._check(api_client, sample_image_bytes).json()
         assert body["verdict"] == "PASS"
         assert body["missing_equipment"] == []
@@ -196,7 +216,9 @@ class TestGeminiSecondOpinion:
         self, api_client, fake_detector, sample_image_bytes, monkeypatch
     ) -> None:
         self._fake_verifier(monkeypatch, "not_worn")
-        fake_detector.detections = [make_detection("hardhat", 0.85)]
+        fake_detector.detections = [
+            make_detection("hardhat", 0.85), make_detection("boots", 0.8),
+        ]
         body = self._check(api_client, sample_image_bytes).json()
         assert body["verdict"] == "FAIL"
         assert body["missing_equipment"] == ["safety_vest"]
@@ -207,7 +229,9 @@ class TestGeminiSecondOpinion:
         self, api_client, fake_detector, sample_image_bytes, monkeypatch
     ) -> None:
         self._fake_verifier(monkeypatch, "uncertain")
-        fake_detector.detections = [make_detection("hardhat", 0.85)]
+        fake_detector.detections = [
+            make_detection("hardhat", 0.85), make_detection("boots", 0.8),
+        ]
         body = self._check(api_client, sample_image_bytes).json()
         assert body["verdict"] == "NEEDS_REVIEW"
         assert body["missing_equipment"] == ["safety_vest"]
@@ -218,7 +242,9 @@ class TestGeminiSecondOpinion:
         self, api_client, fake_detector, sample_image_bytes, monkeypatch
     ) -> None:
         self._fake_verifier(monkeypatch, "worn", confidence=0.5)
-        fake_detector.detections = [make_detection("hardhat", 0.85)]
+        fake_detector.detections = [
+            make_detection("hardhat", 0.85), make_detection("boots", 0.8),
+        ]
         assert self._check(api_client, sample_image_bytes).json()["verdict"] == "NEEDS_REVIEW"
 
     def test_gemini_not_consulted_when_detector_is_sure(
@@ -228,6 +254,7 @@ class TestGeminiSecondOpinion:
         calls = self._fake_verifier(monkeypatch, "worn")
         fake_detector.detections = [
             make_detection("hardhat", 0.9), make_detection("safety_vest", 0.9),
+            make_detection("boots", 0.8),
         ]
         assert self._check(api_client, sample_image_bytes).json()["verdict"] == "PASS"
         fake_detector.detections = [
@@ -240,9 +267,37 @@ class TestGeminiSecondOpinion:
         self, api_client, fake_detector, sample_image_bytes, monkeypatch
     ) -> None:
         calls = self._fake_verifier(monkeypatch, "worn")
-        fake_detector.detections = [make_detection("safety_vest", 0.9)]
+        fake_detector.detections = [
+            make_detection("safety_vest", 0.9), make_detection("boots", 0.8),
+        ]
         self._check(api_client, sample_image_bytes)
         assert calls == [("general_labor", ["hardhat"])]
+
+    def test_boots_missed_by_detector_are_checked_by_gemini(
+        self, api_client, fake_detector, sample_image_bytes, monkeypatch
+    ) -> None:
+        """Boots are not left for a person: a miss goes to Gemini like any item."""
+        calls = self._fake_verifier(monkeypatch, "worn")
+        fake_detector.detections = [
+            make_detection("hardhat", 0.9), make_detection("safety_vest", 0.9),
+        ]
+        body = self._check(api_client, sample_image_bytes).json()
+        assert calls == [("general_labor", ["boots"])]
+        assert body["verdict"] == "PASS"
+        assert body["verdict_source"] == "detector+gemini"
+        assert body["unverifiable_equipment"] == []
+
+    def test_feet_out_of_frame_stays_review(
+        self, api_client, fake_detector, sample_image_bytes, monkeypatch
+    ) -> None:
+        """Gemini cannot see the feet: amber, not a pass and not an accusation."""
+        self._fake_verifier(monkeypatch, "uncertain")
+        fake_detector.detections = [
+            make_detection("hardhat", 0.9), make_detection("safety_vest", 0.9),
+        ]
+        body = self._check(api_client, sample_image_bytes).json()
+        assert body["verdict"] == "NEEDS_REVIEW"
+        assert body["missing_equipment"] == ["boots"]
 
     def test_violation_detection_fails_worker(
         self, api_client, fake_detector, sample_image_bytes

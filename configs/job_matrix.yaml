@@ -4,33 +4,36 @@
 # Maps each job category to the PPE classes REQUIRED for compliance.
 # Class names must match configs/data.yaml.
 #
-# NOTE: boots, ear_protection, face_shield, harness are NOT yet detectable
-# (zero training data — see runs/benchmark_report.md). They are listed under
-# `pending` so the API can report them as "unverifiable" instead of silently
-# passing/failing them. Move them to `required` once the model is retrained
-# with data for those classes.
+# NOTE: ear_protection, face_shield and harness are NOT yet detectable (zero
+# training data). They are listed under `pending` so the API can report them
+# as "unverifiable" instead of silently passing/failing them. Move them to
+# `required` once the model is retrained with data for those classes.
+#
+# boots was promoted to `required` in Oct 2026: the retrained yolo11l detects
+# it (AP50 0.613), and when it misses, the Gemini second opinion looks at the
+# photo instead of failing the worker. Feet out of frame → NEEDS_REVIEW.
 # ============================================================================
 
 jobs:
   general_labor:
-    required: [hardhat, safety_vest]
-    pending: [boots]
+    required: [hardhat, safety_vest, boots]
+    pending: []
 
   welder:
-    required: [hardhat, safety_vest, goggles, gloves]
-    pending: [face_shield, boots]
+    required: [hardhat, safety_vest, goggles, gloves, boots]
+    pending: [face_shield]
 
   electrician:
-    required: [hardhat, safety_vest, gloves, goggles]
-    pending: [boots]
+    required: [hardhat, safety_vest, gloves, goggles, boots]
+    pending: []
 
   height_work:
-    required: [hardhat, safety_vest]
-    pending: [harness, boots]
+    required: [hardhat, safety_vest, boots]
+    pending: [harness]
 
   demolition:
-    required: [hardhat, safety_vest, goggles, mask, gloves]
-    pending: [boots, ear_protection]
+    required: [hardhat, safety_vest, goggles, mask, gloves, boots]
+    pending: [ear_protection]
 
   painter:
     required: [hardhat, safety_vest, mask, goggles]

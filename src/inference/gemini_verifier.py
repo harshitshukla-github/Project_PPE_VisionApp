@@ -68,7 +68,12 @@ ITEM_DESCRIPTIONS: dict[str, str] = {
     "goggles": "safety goggles or safety glasses, worn over the eyes",
     "mask": "a dust mask, respirator or face mask covering the nose and mouth",
     "gloves": "work or safety gloves, worn on the hands",
-    "boots": "safety boots or protective work footwear, worn on the feet",
+    "boots": (
+        "sturdy closed work boots or safety shoes, worn on the feet. Sandals, "
+        "flip-flops, slippers and bare feet are clearly not_worn. A protective "
+        "toe cap cannot be seen in a photo, so do not judge it; light trainers "
+        "or dress shoes that might or might not be safety footwear are uncertain"
+    ),
     "ear_protection": "earmuffs or earplugs, worn on or in the ears",
     "face_shield": "a full transparent face shield, worn in front of the face",
     "harness": "a fall-arrest safety harness, strapped around the torso and legs",
