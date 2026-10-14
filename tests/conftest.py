@@ -29,14 +29,18 @@ def make_detection(class_name: str, confidence: float = 0.9) -> Detection:
 
 @pytest.fixture
 def compliant_detections() -> list[Detection]:
-    """Worker wearing hardhat + vest — passes general_labor."""
-    return [make_detection("hardhat", 0.92), make_detection("safety_vest", 0.88)]
+    """Worker wearing hardhat + vest + boots — passes general_labor."""
+    return [
+        make_detection("hardhat", 0.92),
+        make_detection("safety_vest", 0.88),
+        make_detection("boots", 0.8),
+    ]
 
 
 @pytest.fixture
 def missing_vest_detections() -> list[Detection]:
-    """Worker with hardhat only — fails any job requiring a vest."""
-    return [make_detection("hardhat", 0.85)]
+    """Worker with hardhat and boots but no vest detected."""
+    return [make_detection("hardhat", 0.85), make_detection("boots", 0.8)]
 
 
 @pytest.fixture
@@ -45,6 +49,7 @@ def violation_detections() -> list[Detection]:
     return [
         make_detection("hardhat", 0.9),
         make_detection("safety_vest", 0.87),
+        make_detection("boots", 0.8),
         make_detection("no_hardhat", 0.8),
     ]
 

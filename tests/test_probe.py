@@ -216,7 +216,7 @@ class TestReportRendering:
     def test_job_report_returns_one_diagnosis_per_required_class(self) -> None:
         baseline = make_variant("baseline", {"hardhat": 0.9})
         diagnoses = _print_job_report("general_labor", baseline, [baseline], PROD_CONF)
-        assert {d.class_name for d in diagnoses} == {"hardhat", "safety_vest"}
+        assert {d.class_name for d in diagnoses} == {"hardhat", "safety_vest", "boots"}
         assert all(isinstance(d, ClassDiagnosis) for d in diagnoses)
 
     def test_job_report_flags_missing_vest_as_data_gap(self) -> None:
@@ -226,7 +226,9 @@ class TestReportRendering:
         assert vest.diagnosis == DIAG_DATA_GAP
 
     def test_job_report_all_present_is_clean(self) -> None:
-        baseline = make_variant("baseline", {"hardhat": 0.9, "safety_vest": 0.8})
+        baseline = make_variant(
+            "baseline", {"hardhat": 0.9, "safety_vest": 0.8, "boots": 0.7}
+        )
         diagnoses = _print_job_report("general_labor", baseline, [baseline], PROD_CONF)
         assert all(d.diagnosis == DIAG_DETECTED for d in diagnoses)
 

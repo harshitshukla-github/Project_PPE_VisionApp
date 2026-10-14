@@ -126,7 +126,7 @@ Response `200`:
   ],
   "missing_equipment": [],
   "violations_detected": [],
-  "unverifiable_equipment": ["boots"],
+  "unverifiable_equipment": ["face_shield"],
   "explanation": null,
   "model_used": "yolo26n",
   "inference_time_ms": 30.1,
@@ -161,12 +161,16 @@ Returns a **flat map** — job key → requirements (no wrapper object, no
 display names):
 ```json
 {
-  "welder": { "required": ["hardhat", "goggles", "gloves"], "pending": ["face_shield"] },
-  "general_labor": { "required": ["hardhat", "safety_vest"], "pending": ["boots"] }
+  "welder": { "required": ["hardhat", "safety_vest", "goggles", "gloves", "boots"], "pending": ["face_shield"] },
+  "general_labor": { "required": ["hardhat", "safety_vest", "boots"], "pending": [] }
 }
 ```
 - Dropdown values = the object keys. For labels, title-case the key in the
   app (`general_labor` → "General Labor").
+- `boots` is in `required` for every job except `painter`. The worker's
+  feet must be in the photo: if they are cut off, the check comes back
+  `NEEDS_REVIEW` with `boots` in `missing_equipment`, so keep the full-body
+  framing hint on the Capture screen.
 - `required` = what the check enforces; `pending` = equipment the model
   can't detect yet (these surface as `unverifiable_equipment` in check
   results). Cache in memory; refetch on pull-to-refresh.

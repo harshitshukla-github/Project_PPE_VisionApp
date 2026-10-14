@@ -69,7 +69,7 @@ Response (`200`):
   ],
   "missing_equipment": [],
   "violations_detected": ["no_vest"],
-  "unverifiable_equipment": ["boots"],
+  "unverifiable_equipment": ["face_shield"],
   "explanation": "You're missing your safety vest ...",
   "model_used": "yolo11l",
   "inference_time_ms": 62.3,
@@ -101,6 +101,9 @@ Field notes for the app:
   item is also detected (multi-person frames).
 - `unverifiable_equipment` — required by the job but not yet detectable by
   the model (no training data). Show as "verify manually", not as a failure.
+  Today that is `face_shield`, `harness` and `ear_protection` only. `boots`
+  is enforced like any other item: the detector looks first, and when it
+  finds none Gemini checks the photo. Feet out of frame gives `NEEDS_REVIEW`.
 - Errors: `400` undecodable image, `422` unknown `job_category` (message
   lists valid ones).
 
@@ -120,8 +123,9 @@ Full comparison: `runs/benchmark_report.md` (generate with
 
 Weight files (`models/*.pt`) are **not in git** (too large) — get them from
 Harshit or retrain (`cli.py train`). Known model limitations: `no_vest`
-accuracy is weak (AP 0.24) and four classes (`boots`, `ear_protection`,
-`face_shield`, `harness`) have no training data yet.
+accuracy is weak (AP 0.27), `boots` is modest (AP 0.61, so Gemini settles
+many boots checks) and three classes (`ear_protection`, `face_shield`,
+`harness`) have no training data yet.
 
 ---
 
