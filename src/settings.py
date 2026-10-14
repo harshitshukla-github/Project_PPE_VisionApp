@@ -86,5 +86,9 @@ class Settings(BaseSettings):
     data_splits_dir: Path = Path("data/splits")
     configs_dir: Path = Path("configs")
 
+    # PostgreSQL for the admin system — written by `cli.py db setup`.
+    database_url: str = Field("", alias="DATABASE_URL")
+    test_database_url: str = Field("", alias="TEST_DATABASE_URL")
+
 
 settings = Settings()

@@ -138,7 +138,31 @@ uv run python cli.py benchmark            # test-split comparison + report
 uv run python cli.py export --model yolo26n --half --int8   # ONNX for edge
 uv run python cli.py serve --model yolo11l --port 8000
 uv run python cli.py info                 # pipeline status check
+uv run python cli.py db setup             # create the admin system's database
+uv run python cli.py db status            # check .env can connect
 ```
+
+## Database (admin system)
+
+The admin dashboard stores its data in PostgreSQL (tested on 18). On each
+machine, once:
+
+```bash
+uv run python cli.py db setup
+```
+
+It asks for the password of your existing `postgres` superuser, which is
+used for that one connection and never stored. It creates:
+
+- a `ppb_app` login role with no superuser rights, its password generated
+  and written only to `.env`
+- `ppb`, the application database, and `ppb_test`, which the test suite may
+  wipe, both owned by `ppb_app`
+
+and adds `DATABASE_URL` and `TEST_DATABASE_URL` to `.env`. Re-running it is
+safe: it reuses the password already in `.env` and repairs anything missing.
+Use `--superuser`, `--host` or `--port` if your server differs from
+`postgres@localhost:5432`.
 
 ## Project layout
 
