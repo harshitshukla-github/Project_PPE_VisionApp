@@ -57,6 +57,13 @@ data_app = typer.Typer(
 )
 app.add_typer(data_app, name="data")
 
+db_app = typer.Typer(
+    help="PostgreSQL for the admin system: setup, status.",
+    rich_markup_mode="markdown",
+    no_args_is_help=True,
+)
+app.add_typer(db_app, name="db")
+
 console = Console()
 
 # ---------------------------------------------------------------------------
@@ -777,6 +784,137 @@ def info_cmd() -> None:
         status_table.add_row(label, "[green]✓ ready[/]" if exists else "[yellow]✗ missing[/]")
 
     console.print(status_table)
+
+
+# ---------------------------------------------------------------------------
+# db commands
+# ---------------------------------------------------------------------------
+
+def _print_connection_report(label: str, url: str) -> bool:
+    """Check one connection URL and print what was found. Returns success."""
+    import psycopg
+
+    from src.db.bootstrap import check_connection, mask_url
+
+    try:
+        report = check_connection(url)
+    except (psycopg.Error, ValueError) as exc:
+        console.print(f"[red]✗ {label}[/red] {mask_url(url)}\n  {str(exc).strip()}")
+        return False
+    tables = "[green]yes[/green]" if report.can_create_tables else "[red]no[/red]"
+    console.print(
+        f"[green]✓ {label}[/green] {mask_url(url)}\n"
+        f"  PostgreSQL {report.server_version} · user {report.current_user} · "
+        f"database {report.database} · can create tables: {tables}"
+    )
+    return report.can_create_tables
+
+
+@db_app.command("setup")
+def db_setup_cmd(
+    host: str = typer.Option("localhost", "--host", help="PostgreSQL server host."),
+    port: int = typer.Option(5432, "--port", help="PostgreSQL server port."),
+    superuser: str = typer.Option(
+        "postgres", "--superuser", help="Existing superuser to provision with."
+    ),
+    env_file: Path = typer.Option(Path(".env"), "--env-file", help=".env file to update."),
+) -> None:
+    """
+    Create the **ppb_app** role and the **ppb** and **ppb_test** databases,
+    then write `DATABASE_URL` and `TEST_DATABASE_URL` to `.env`.
+
+    Asks once for the superuser's password. It is used for this one
+    connection and never stored. The app role's password is generated and
+    written only to `.env`; re-running reuses it. Safe to run again.
+
+    ```bash
+    uv run python cli.py db setup
+    ```
+    """
+    import psycopg
+
+    from src.db import bootstrap as b
+
+    _setup_logger()
+    password = None
+    existing = b.read_env_var(env_file, b.DATABASE_URL_KEY)
+    if existing:
+        try:
+            parts = b.parse_url(existing)
+            if parts.user == b.APP_ROLE and parts.password:
+                password = parts.password
+                console.print(f"Reusing the {b.APP_ROLE} password already in {env_file}.")
+        except ValueError:
+            pass
+    password = password or b.generate_password()
+
+    su_password = typer.prompt(
+        f"Password for PostgreSQL superuser '{superuser}' (not stored)", hide_input=True
+    )
+    try:
+        with psycopg.connect(
+            host=host,
+            port=port,
+            user=superuser,
+            password=su_password,
+            dbname="postgres",
+            autocommit=True,
+            connect_timeout=5,
+        ) as conn:
+            actions = b.provision(conn, b.APP_ROLE, password, [b.APP_DB, b.TEST_DB])
+    except psycopg.Error as exc:
+        console.print(
+            f"[red]Provisioning as '{superuser}' on {host}:{port} failed.[/red]\n"
+            f"  {str(exc).strip()}"
+        )
+        raise typer.Exit(code=1) from None
+
+    for action in actions:
+        console.print(f"  • {action}")
+
+    b.upsert_env_var(
+        env_file,
+        b.DATABASE_URL_KEY,
+        b.build_url(b.APP_ROLE, password, host, port, b.APP_DB),
+        comment="PostgreSQL — admin system. Written by `cli.py db setup`; holds a password.",
+    )
+    b.upsert_env_var(
+        env_file,
+        b.TEST_DATABASE_URL_KEY,
+        b.build_url(b.APP_ROLE, password, host, port, b.TEST_DB),
+        comment="Throwaway database the test suite may wipe. Never point this at real data.",
+    )
+    console.print(f"Wrote {b.DATABASE_URL_KEY} and {b.TEST_DATABASE_URL_KEY} to {env_file}.\n")
+
+    ok = all(
+        _print_connection_report(label, b.read_env_var(env_file, key) or "")
+        for label, key in (
+            ("app", b.DATABASE_URL_KEY),
+            ("test", b.TEST_DATABASE_URL_KEY),
+        )
+    )
+    if not ok:
+        raise typer.Exit(code=1)
+
+
+@db_app.command("status")
+def db_status_cmd() -> None:
+    """Check that `DATABASE_URL` and `TEST_DATABASE_URL` connect and can create tables."""
+    from src.db.bootstrap import DATABASE_URL_KEY, TEST_DATABASE_URL_KEY
+
+    urls = [
+        ("app", DATABASE_URL_KEY, settings.database_url),
+        ("test", TEST_DATABASE_URL_KEY, settings.test_database_url),
+    ]
+    ok = True
+    for label, key, url in urls:
+        if not url:
+            console.print(f"[yellow]✗ {label}[/yellow] {key} is not set — run `cli.py db setup`.")
+            ok = False
+            continue
+        ok = _print_connection_report(label, url) and ok
+    if not ok:
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------

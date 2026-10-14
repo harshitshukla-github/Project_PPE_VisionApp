@@ -48,6 +48,7 @@ dependencies = [
     # Jupyter
     "jupyterlab>=4.1.0",
     "ipywidgets>=8.1.0",
+    "psycopg[binary]>=3.2",
 ]
 
 [build-system]
