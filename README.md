@@ -183,8 +183,31 @@ The server re-reads the matrix every `PPB_MATRIX_CACHE_S` seconds (default
 30). If Postgres stops answering it keeps using the last matrix it read; if
 it never read one, `/jobs` and `/compliance/check` return 503.
 
-The tests in `tests/test_db_matrix.py` wipe and rebuild the database in
-`TEST_DATABASE_URL`, and refuse to run unless its name ends in `_test`.
+The database tests wipe and rebuild the database in `TEST_DATABASE_URL`
+before each test, and refuse to run unless its name ends in `_test`.
+
+## Login (admin system)
+
+The contract is [`docs/auth-api.md`](docs/auth-api.md). In short: admins and
+supervisors sign in to the dashboard with email + password (cookie session);
+workers sign in to the app with a worker ID + 6-digit PIN (bearer token).
+There is no sign-up. Until the dashboard exists, accounts come from the CLI:
+
+```bash
+uv run python cli.py db migrate                                        # creates the login tables
+uv run python cli.py auth create-admin --email you@example.com --name "Your Name"
+uv run python cli.py auth create-worker --worker-id W-0042 --name "Asha Verma"   # prints a one-time PIN
+uv run python cli.py auth reset-pin --worker-id W-0042                 # new one-time PIN, unlocks
+```
+
+`PPB_WORKER_AUTH=optional` (the default) keeps today's app working: a check
+without a token uses the `worker_id` form field. Switch it to `required` only
+after the app ships its login screen. Set `PPB_COOKIE_SECURE=false` only to
+use the dashboard over plain `http://` on a LAN address.
+
+`tests/test_auth_api.py` calls every route without credentials; a new route
+that forgets its login check fails CI until it is either protected or added
+to the test's list of public routes.
 
 ## Project layout
 

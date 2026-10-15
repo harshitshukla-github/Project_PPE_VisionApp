@@ -1,8 +1,9 @@
 """The job matrix in a real PostgreSQL database.
 
 Runs against TEST_DATABASE_URL, which `cli.py db setup` writes to .env and
-CI provides. Skipped when it is not set. Every test starts from an empty
-schema, so the database named there is wiped: it must be named *_test.
+CI provides. Skipped when it is not set. The empty_db / migrated_db /
+seeded_db fixtures (tests/conftest.py) wipe that database before each test,
+so it must be named *_test.
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ from sqlalchemy import Engine, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.db.engine import get_engine
 from src.db.matrix import ITEMS, read_matrix, seed_from_yaml
 from src.db.migrate import alembic_config, current_revision, head_revision, upgrade_to_head
 from src.db.models import Job, JobRequirement, PpeItem
@@ -40,31 +40,6 @@ def _yaml_matrix() -> dict[str, dict[str, list[str]]]:
         job: {"required": req.required, "pending": req.pending}
         for job, req in load_job_matrix(path=YAML_PATH).items()
     }
-
-
-@pytest.fixture
-def empty_db() -> Engine:
-    """An engine on the test database, with every table dropped."""
-    dbname = URL.rsplit("/", 1)[-1].split("?", 1)[0]
-    if not dbname.endswith("_test"):
-        pytest.fail(f"refusing to wipe '{dbname}': TEST_DATABASE_URL must name a *_test database")
-    engine = get_engine(URL)
-    with engine.begin() as conn:
-        conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
-        conn.execute(text("CREATE SCHEMA public"))
-    return engine
-
-
-@pytest.fixture
-def migrated_db(empty_db: Engine) -> Engine:
-    upgrade_to_head(URL)
-    return empty_db
-
-
-@pytest.fixture
-def seeded_db(migrated_db: Engine) -> Engine:
-    seed_from_yaml(migrated_db, YAML_PATH)
-    return migrated_db
 
 
 class TestMigrations:

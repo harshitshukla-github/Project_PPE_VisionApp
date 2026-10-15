@@ -1,6 +1,7 @@
 # Phase 2 — Login API contract
 
-**Status: draft for review by Harshit and Priyanka. Nothing here is built yet.**
+**Status: under review by Harshit and Priyanka. The backend is built to
+this draft (§1–§7); the mobile app and dashboard parts (§8) are not started.**
 
 Once both of you agree on this document, the backend, the mobile app and the
 admin dashboard are built against it in parallel. Any change after that goes

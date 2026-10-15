@@ -5,6 +5,7 @@ pydantic-settings. Import ``settings`` from here everywhere.
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -91,6 +92,17 @@ class Settings(BaseSettings):
     test_database_url: str = Field("", alias="TEST_DATABASE_URL")
     # How long a server keeps the job matrix before re-reading the database.
     ppb_matrix_cache_s: float = Field(30.0, alias="PPB_MATRIX_CACHE_S")
+
+    # Login (docs/auth-api.md). "optional": a check without a token still
+    # works, as before the app had a login screen. "required": it gets 401.
+    ppb_worker_auth: Literal["optional", "required"] = Field(
+        "optional", alias="PPB_WORKER_AUTH"
+    )
+    # Only turn off for development over plain http:// on a LAN address.
+    ppb_cookie_secure: bool = Field(True, alias="PPB_COOKIE_SECURE")
+    ppb_user_session_hours: float = Field(12.0, alias="PPB_USER_SESSION_HOURS")
+    ppb_user_idle_minutes: float = Field(120.0, alias="PPB_USER_IDLE_MINUTES")
+    ppb_worker_session_hours: float = Field(12.0, alias="PPB_WORKER_SESSION_HOURS")
 
 
 settings = Settings()

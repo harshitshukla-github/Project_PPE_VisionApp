@@ -1,10 +1,16 @@
 """Database tables for the admin system.
 
-Phase 1 holds the Job PPE Matrix: which equipment each job requires.
+The Job PPE Matrix (Phase 1): which equipment each job requires.
 
 - ``ppe_items``        the equipment the system knows about (hardhat, ...)
 - ``jobs``             job categories the app offers (welder, ...)
 - ``job_requirements`` one row per (job, item): ``required`` or ``pending``
+
+Login (Phase 2, contract in ``docs/auth-api.md``):
+
+- ``users``     dashboard accounts: admins and supervisors
+- ``workers``   people who run checks from the mobile app
+- ``sessions``  one row per login, for a user or a worker; tokens stored hashed
 
 Schema changes go through Alembic (``src/db/migrations``); after editing
 these classes, add a migration. ``tests/test_db_matrix.py`` fails if the
@@ -110,4 +116,106 @@ class JobRequirement(Base):
 
     __table_args__ = (
         CheckConstraint("mode IN ('required', 'pending')", name="mode_valid"),
+    )
+
+
+class Role(str, enum.Enum):
+    """What a dashboard user may do (see docs/auth-api.md §2)."""
+
+    ADMIN = "admin"
+    SUPERVISOR = "supervisor"
+
+
+class User(Base):
+    """A dashboard account."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(254), unique=True)
+    display_name: Mapped[str] = mapped_column(String(100))
+    role: Mapped[str] = mapped_column(String(16))
+    password_hash: Mapped[str] = mapped_column(String(255))
+    must_change_password: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    failed_attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'supervisor')", name="role_valid"),
+        CheckConstraint("email = lower(email)", name="email_lowercase"),
+    )
+
+
+class Worker(Base):
+    """Someone who runs compliance checks from the mobile app."""
+
+    __tablename__ = "workers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # What the API calls ``worker_id``, e.g. "W-0042". Stored upper case.
+    worker_code: Mapped[str] = mapped_column(String(32), unique=True)
+    display_name: Mapped[str] = mapped_column(String(100))
+    pin_hash: Mapped[str] = mapped_column(String(255))
+    # True while the worker still has the PIN a supervisor issued.
+    must_change_pin: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    failed_attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("worker_code ~ '^[A-Z0-9][A-Z0-9-]{1,31}$'", name="worker_code_format"),
+    )
+
+
+class AuthSession(Base):
+    """One login, by a dashboard user or by a worker.
+
+    Only a SHA-256 hash of the token is stored, so a copy of this table
+    holds no session anyone could use.
+    """
+
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    # Dashboard sessions only: echoed in X-CSRF-Token on every write.
+    csrf_token: Mapped[str | None] = mapped_column(String(64))
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    worker_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workers.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user_agent: Mapped[str | None] = mapped_column(String(255))
+    ip: Mapped[str | None] = mapped_column(String(64))
+
+    user: Mapped[User | None] = relationship()
+    worker: Mapped[Worker | None] = relationship()
+
+    __table_args__ = (
+        CheckConstraint("(user_id IS NULL) <> (worker_id IS NULL)", name="one_owner"),
     )
