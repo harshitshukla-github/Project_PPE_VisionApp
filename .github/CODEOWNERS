@@ -1,0 +1,22 @@
+# Who GitHub asks to review a pull request, by the paths it changes.
+# When several patterns match a file, the LAST one wins.
+#
+# Reviews are requested automatically, not required: a pull request can
+# still merge once CI passes. GitHub never asks the author to review their
+# own pull request, so the other person is the one notified.
+
+# Default: backend, data pipeline, training, configs, CI
+*                               @harshitshukla-github
+
+# Mobile app
+/mobile/                        @ANGELTexas
+
+# Admin dashboard (Phase 4): built by Priyanka, served by the FastAPI backend
+/admin/                         @ANGELTexas @harshitshukla-github
+
+# The contract between the backend and the apps. A change here can break
+# the mobile app or the dashboard, so both review it.
+/INSTRUCTIONS.md                @harshitshukla-github @ANGELTexas
+/docs/                          @harshitshukla-github @ANGELTexas
+/src/api/                       @harshitshukla-github @ANGELTexas
+/src/inference/schemas.py       @harshitshukla-github @ANGELTexas
