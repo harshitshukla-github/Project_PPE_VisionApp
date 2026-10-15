@@ -154,7 +154,9 @@ Semantics the UI must respect:
   alone) to roughly 10 s (second opinion plus explanation).
 - `bbox` = `[x1, y1, x2, y2]` in pixels of the uploaded image.
 - Errors: `400` bad image, `422` invalid `job_category` (body's `detail`
-  lists valid ones), network failure = server unreachable (see §5).
+  lists valid ones), `503` job requirements temporarily unavailable (the
+  server's database is down and it has no copy yet; show "try again
+  shortly", not a verdict), network failure = server unreachable (see §5).
 
 ### GET /jobs
 Returns a **flat map** — job key → requirements (no wrapper object, no
@@ -174,6 +176,10 @@ display names):
 - `required` = what the check enforces; `pending` = equipment the model
   can't detect yet (these surface as `unverifiable_equipment` in check
   results). Cache in memory; refetch on pull-to-refresh.
+- The list is now managed centrally (in the server's database, soon edited
+  from the admin dashboard), so jobs can be added, renamed or removed
+  between app launches. Never hardcode job keys, and refetch before a check
+  if the cached list is old. Can also return `503` (see above).
 
 ### GET /health
 `{ "status": "ok", "model": "...", ... }` — use for the connection

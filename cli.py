@@ -915,6 +915,95 @@ def db_status_cmd() -> None:
         ok = _print_connection_report(label, url) and ok
     if not ok:
         raise typer.Exit(code=1)
+    _print_schema_report(settings.database_url)
+
+
+def _print_schema_report(url: str) -> None:
+    """Print the app database's migration revision and how many jobs it holds."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from src.db.engine import get_engine
+    from src.db.matrix import count_jobs
+    from src.db.migrate import current_revision, head_revision
+
+    head = head_revision()
+    try:
+        current = current_revision(url)
+        jobs = count_jobs(get_engine(url)) if current else 0
+    except SQLAlchemyError as exc:
+        console.print(f"[red]✗ schema[/red] could not be read: {str(exc).splitlines()[0]}")
+        raise typer.Exit(code=1) from None
+
+    if current != head:
+        console.print(
+            f"[yellow]✗ schema[/yellow] at revision {current or 'none'}, latest is {head} "
+            "— run `cli.py db migrate`."
+        )
+    elif not jobs:
+        console.print(f"[yellow]✗ schema[/yellow] at {head}, but no jobs — run `cli.py db seed`.")
+    else:
+        console.print(f"[green]✓ schema[/green] at {head} · {jobs} jobs")
+
+
+@db_app.command("migrate")
+def db_migrate_cmd() -> None:
+    """
+    Bring the database in `DATABASE_URL` up to the latest schema.
+
+    Safe to run any time: migrations already applied are skipped.
+    """
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from src.db.migrate import current_revision, head_revision, upgrade_to_head
+
+    _setup_logger()
+    if not settings.database_url:
+        console.print("[red]DATABASE_URL is not set — run `cli.py db setup` first.[/red]")
+        raise typer.Exit(code=1)
+    try:
+        before = current_revision()
+        upgrade_to_head()
+        after = current_revision()
+    except SQLAlchemyError as exc:
+        console.print(f"[red]Migration failed:[/red] {str(exc).splitlines()[0]}")
+        raise typer.Exit(code=1) from None
+    if before == after:
+        console.print(f"Already up to date at revision {after}.")
+    else:
+        console.print(f"Migrated from {before or 'an empty database'} to {after} (latest {head_revision()}).")
+
+
+@db_app.command("seed")
+def db_seed_cmd(
+    matrix_file: Path = typer.Option(
+        Path("configs/job_matrix.yaml"), "--matrix", help="Job matrix YAML to load."
+    ),
+) -> None:
+    """
+    Load the PPE items and the job matrix from YAML into an empty database.
+
+    Jobs are only added when the database has none: after that, the
+    database is the source of truth and the YAML is not applied again.
+    """
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from src.db.engine import get_engine
+    from src.db.matrix import seed_from_yaml
+
+    _setup_logger()
+    if not settings.database_url:
+        console.print("[red]DATABASE_URL is not set — run `cli.py db setup` first.[/red]")
+        raise typer.Exit(code=1)
+    try:
+        report = seed_from_yaml(get_engine(), matrix_file)
+    except (SQLAlchemyError, ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]Seeding failed:[/red] {str(exc).splitlines()[0]}")
+        raise typer.Exit(code=1) from None
+    console.print(f"Items added: {report.items_added}")
+    if report.skipped_reason:
+        console.print(f"Jobs not loaded: {report.skipped_reason}.")
+    else:
+        console.print(f"Jobs added: {report.jobs_added} (from {matrix_file})")
 
 
 # ---------------------------------------------------------------------------

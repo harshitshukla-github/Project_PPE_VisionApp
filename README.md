@@ -164,6 +164,28 @@ safe: it reuses the password already in `.env` and repairs anything missing.
 Use `--superuser`, `--host` or `--port` if your server differs from
 `postgres@localhost:5432`.
 
+Then create the tables and load the job matrix:
+
+```bash
+uv run python cli.py db migrate           # safe to re-run; also after every pull
+uv run python cli.py db seed              # loads configs/job_matrix.yaml once
+uv run python cli.py db status            # connection, schema revision, job count
+```
+
+**Where the job matrix comes from.** With `DATABASE_URL` set, the API reads
+the matrix from Postgres, and the server refuses to start until it has been
+migrated and seeded. `db seed` only fills an empty database: after that the
+database is the source of truth (the admin dashboard will edit it there), and
+`configs/job_matrix.yaml` is not applied again. Without `DATABASE_URL`, the
+API reads the YAML file as before.
+
+The server re-reads the matrix every `PPB_MATRIX_CACHE_S` seconds (default
+30). If Postgres stops answering it keeps using the last matrix it read; if
+it never read one, `/jobs` and `/compliance/check` return 503.
+
+The tests in `tests/test_db_matrix.py` wipe and rebuild the database in
+`TEST_DATABASE_URL`, and refuse to run unless its name ends in `_test`.
+
 ## Project layout
 
 ```

@@ -21,6 +21,7 @@ from loguru import logger
 from src.api.deps import init_detector
 from src.api.middleware import add_middleware
 from src.api.routes import router
+from src.inference.compliance import MatrixUnavailableError, load_job_matrix, matrix_source
 from src.settings import settings
 
 # Read by the lifespan hook; set by cli.py serve before uvicorn starts.
@@ -34,6 +35,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     model_name = os.environ.get(MODEL_ENV_VAR) or None
     device = os.environ.get(DEVICE_ENV_VAR) or None
     detector = init_detector(model_name=model_name, device=device)
+
+    # Fail at startup, with the fix in the message, rather than answer every
+    # check with a 503 because the database was never migrated or seeded.
+    try:
+        jobs = load_job_matrix()
+    except MatrixUnavailableError as exc:
+        raise RuntimeError(
+            f"{exc}. DATABASE_URL is set, so the job matrix must come from the "
+            "database: run `uv run python cli.py db migrate` and then "
+            "`uv run python cli.py db seed`. To use configs/job_matrix.yaml "
+            "instead, remove DATABASE_URL from .env."
+        ) from exc
+    logger.info(f"Job matrix: {len(jobs)} jobs, read from {matrix_source()}")
 
     if settings.ppb_debug_dump_uploads:
         logger.warning(

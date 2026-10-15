@@ -13,7 +13,28 @@ from typing import Iterator
 import numpy as np
 import pytest
 
+from src.inference.compliance import invalidate_job_matrix_cache
 from src.inference.schemas import Detection
+from src.settings import settings
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Read the job matrix from YAML unless a test opts into a database.
+
+    A developer's .env sets DATABASE_URL to their working database. Without
+    this, test results would depend on whatever that database holds, and
+    tests parametrized from the matrix would query it at collection time.
+    Database tests use TEST_DATABASE_URL explicitly (tests/test_db_matrix.py).
+    """
+    settings.database_url = ""
+
+
+@pytest.fixture(autouse=True)
+def _fresh_job_matrix_cache() -> Iterator[None]:
+    """No test sees a database matrix cached by an earlier one."""
+    invalidate_job_matrix_cache()
+    yield
+    invalidate_job_matrix_cache()
 
 
 # ---------------------------------------------------------------------------

@@ -3182,6 +3182,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "albumentations" },
+    { name = "alembic" },
     { name = "fastapi" },
     { name = "google-genai" },
     { name = "ipywidgets" },
@@ -3210,6 +3211,7 @@ dependencies = [
     { name = "roboflow" },
     { name = "ruff" },
     { name = "seaborn" },
+    { name = "sqlalchemy" },
     { name = "supervision" },
     { name = "tensorboard" },
     { name = "torch", version = "2.6.0+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -3224,6 +3226,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "albumentations", specifier = ">=1.4.0" },
+    { name = "alembic", specifier = ">=1.13" },
     { name = "fastapi", specifier = ">=0.111.0" },
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "ipywidgets", specifier = ">=8.1.0" },
@@ -3249,6 +3252,7 @@ requires-dist = [
     { name = "roboflow", specifier = ">=1.1.0" },
     { name = "ruff", specifier = ">=0.4.0" },
     { name = "seaborn", specifier = ">=0.13.0" },
+    { name = "sqlalchemy", specifier = ">=2.0.30" },
     { name = "supervision", specifier = ">=0.21.0" },
     { name = "tensorboard", specifier = ">=2.16.0" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = ">=2.2.0" },

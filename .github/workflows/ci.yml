@@ -63,7 +63,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Check the database connection
+      # The same commands a developer runs. The database tests then wipe and
+      # rebuild this database themselves, so this step only proves the CLI path.
+      - name: Migrate and seed the database
+        run: |
+          uv run python cli.py db migrate
+          uv run python cli.py db seed
+
+      - name: Check the database
         run: uv run python cli.py db status
 
       - name: Run tests (coverage must stay at or above 80%)
