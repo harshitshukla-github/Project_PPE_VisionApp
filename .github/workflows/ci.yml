@@ -1,0 +1,96 @@
+# Runs on every pull request into main and every push to main.
+# Two independent jobs: the Python backend and the React Native app.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run it replaces.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    # A throwaway PostgreSQL 18, matching the version the team runs locally.
+    # Its credentials exist only inside this job.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: ppb_app
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: ppb_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ppb_app -d ppb_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      # Settings() refuses to load without these two. The tests never call
+      # Roboflow or Gemini, so placeholders are enough; no real key is needed.
+      ROBOFLOW_API_KEY: ci-placeholder
+      GOOGLE_API_KEY: ci-placeholder
+      PPB_DEVICE: cpu
+      # The CI server has a single database, so both URLs point at it.
+      DATABASE_URL: postgresql://ppb_app:ci-only-password@localhost:5432/ppb_test
+      TEST_DATABASE_URL: postgresql://ppb_app:ci-only-password@localhost:5432/ppb_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # --locked fails the run if pyproject.toml changed without uv.lock.
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Check the database connection
+        run: uv run python cli.py db status
+
+      - name: Run tests (coverage must stay at or above 80%)
+        run: uv run pytest -q
+
+  mobile:
+    name: Mobile app (tsc + jest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npx jest --ci

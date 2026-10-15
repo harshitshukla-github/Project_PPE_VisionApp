@@ -149,7 +149,13 @@ def upsert_env_var(path: Path, key: str, value: str, comment: str | None = None)
     Returns:
         ``True`` if the variable was appended, ``False`` if replaced.
     """
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    # newline="" turns off Python's newline translation in both directions.
+    # Without it, reading turns every \r\n into \n, so CRLF is never seen,
+    # and writing on Windows turns every \n into \r\n.
+    text = ""
+    if path.exists():
+        with path.open(encoding="utf-8", newline="") as handle:
+            text = handle.read()
     newline = "\r\n" if "\r\n" in text else "\n"
     lines = text.splitlines()
 
@@ -157,7 +163,7 @@ def upsert_env_var(path: Path, key: str, value: str, comment: str | None = None)
         match = _ENV_LINE.match(line)
         if match and match.group(1) == key:
             lines[index] = f"{key}={value}"
-            path.write_text(newline.join(lines) + newline, encoding="utf-8")
+            path.write_text(newline.join(lines) + newline, encoding="utf-8", newline="")
             return False
 
     while lines and not lines[-1].strip():
@@ -167,7 +173,7 @@ def upsert_env_var(path: Path, key: str, value: str, comment: str | None = None)
     if comment:
         lines.extend(f"# {c}" if c else "#" for c in comment.splitlines())
     lines.append(f"{key}={value}")
-    path.write_text(newline.join(lines) + newline, encoding="utf-8")
+    path.write_text(newline.join(lines) + newline, encoding="utf-8", newline="")
     return True
 
 
