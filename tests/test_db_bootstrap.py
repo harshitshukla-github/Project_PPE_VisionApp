@@ -123,19 +123,29 @@ class TestPasswordsAndUrls:
 
 
 class TestEnvFile:
+    """Compared as bytes: text-mode reads and writes translate newlines
+    differently per platform, which once let a broken implementation pass
+    on Windows and fail on Linux."""
+
     def test_appends_with_comment_and_keeps_other_lines(self, tmp_path: Path) -> None:
         env = tmp_path / ".env"
-        env.write_text("A=1\nB=2  # note\n\n\n", encoding="utf-8")
+        env.write_bytes(b"A=1\nB=2  # note\n\n\n")
         assert upsert_env_var(env, "DATABASE_URL", "postgresql://x", comment="DB line") is True
-        assert env.read_text(encoding="utf-8") == (
-            "A=1\nB=2  # note\n\n# DB line\nDATABASE_URL=postgresql://x\n"
+        assert env.read_bytes() == (
+            b"A=1\nB=2  # note\n\n# DB line\nDATABASE_URL=postgresql://x\n"
         )
 
     def test_replaces_in_place_without_duplicating(self, tmp_path: Path) -> None:
         env = tmp_path / ".env"
-        env.write_text("A=1\nDATABASE_URL=old\nC=3\n", encoding="utf-8")
+        env.write_bytes(b"A=1\nDATABASE_URL=old\nC=3\n")
         assert upsert_env_var(env, "DATABASE_URL", "new") is False
-        assert env.read_text(encoding="utf-8") == "A=1\nDATABASE_URL=new\nC=3\n"
+        assert env.read_bytes() == b"A=1\nDATABASE_URL=new\nC=3\n"
+
+    def test_replace_keeps_windows_line_endings(self, tmp_path: Path) -> None:
+        env = tmp_path / ".env"
+        env.write_bytes(b"A=1\r\nDATABASE_URL=old\r\nC=3\r\n")
+        upsert_env_var(env, "DATABASE_URL", "new")
+        assert env.read_bytes() == b"A=1\r\nDATABASE_URL=new\r\nC=3\r\n"
 
     def test_does_not_touch_a_variable_whose_name_only_starts_the_same(
         self, tmp_path: Path
@@ -156,7 +166,7 @@ class TestEnvFile:
     def test_creates_a_missing_file(self, tmp_path: Path) -> None:
         env = tmp_path / ".env"
         upsert_env_var(env, "DATABASE_URL", "x")
-        assert env.read_text(encoding="utf-8") == "DATABASE_URL=x\n"
+        assert env.read_bytes() == b"DATABASE_URL=x\n"
 
     def test_read_strips_quotes_and_inline_comments(self, tmp_path: Path) -> None:
         env = tmp_path / ".env"
