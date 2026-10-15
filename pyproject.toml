@@ -49,6 +49,8 @@ dependencies = [
     "jupyterlab>=4.1.0",
     "ipywidgets>=8.1.0",
     "psycopg[binary]>=3.2",
+    "sqlalchemy>=2.0.30",
+    "alembic>=1.13",
 ]
 
 [build-system]
@@ -95,6 +97,9 @@ omit = [
     "src/data/validator.py",
     "src/training/trainer.py",
     "src/training/callbacks.py",
+    # Alembic migration scripts: tests/test_db_matrix.py runs them and checks
+    # they match the models, which line coverage cannot measure.
+    "src/db/migrations/*",
 ]
 
 [tool.coverage.report]

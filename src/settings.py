@@ -89,6 +89,8 @@ class Settings(BaseSettings):
     # PostgreSQL for the admin system — written by `cli.py db setup`.
     database_url: str = Field("", alias="DATABASE_URL")
     test_database_url: str = Field("", alias="TEST_DATABASE_URL")
+    # How long a server keeps the job matrix before re-reading the database.
+    ppb_matrix_cache_s: float = Field(30.0, alias="PPB_MATRIX_CACHE_S")
 
 
 settings = Settings()

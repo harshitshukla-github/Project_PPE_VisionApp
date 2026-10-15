@@ -13,7 +13,13 @@ from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 
 from src.api.deps import get_detector
-from src.inference.compliance import apply_verification, check_compliance, load_job_matrix
+from src.inference.compliance import (
+    JobRequirements,
+    MatrixUnavailableError,
+    apply_verification,
+    check_compliance,
+    load_job_matrix,
+)
 from src.inference.detector import PPEDetector
 from src.inference.gemini_explainer import explain_failure
 from src.inference.gemini_verifier import verify_items
@@ -192,13 +198,11 @@ async def compliance_check(
     costs one vision call and a few seconds. If Gemini is switched off or
     unreachable, step 2 is skipped and the verdict stays ``NEEDS_REVIEW``.
     """
-    try:
-        load_job_matrix()[job_category]
-    except KeyError:
+    matrix = _job_matrix_or_503()
+    if job_category not in matrix:
         raise HTTPException(
             status_code=422,
-            detail=f"Unknown job_category '{job_category}'. "
-                   f"Known: {sorted(load_job_matrix())}",
+            detail=f"Unknown job_category '{job_category}'. Known: {sorted(matrix)}",
         )
 
     array = await _decode_upload(image)
@@ -253,5 +257,21 @@ def list_jobs() -> dict[str, dict[str, list[str]]]:
     """List job categories and their PPE requirements (for app dropdowns)."""
     return {
         job: {"required": req.required, "pending": req.pending}
-        for job, req in load_job_matrix().items()
+        for job, req in _job_matrix_or_503().items()
     }
+
+
+def _job_matrix_or_503() -> dict[str, JobRequirements]:
+    """The job matrix, or a 503 when the database holding it can't be read.
+
+    Guessing the requirements would be worse than refusing the check: a
+    stale or default list could pass a worker the admin now requires more of.
+    """
+    try:
+        return load_job_matrix()
+    except MatrixUnavailableError as exc:
+        logger.error(str(exc))
+        raise HTTPException(
+            status_code=503,
+            detail="Job requirements are temporarily unavailable. Try again shortly.",
+        ) from exc

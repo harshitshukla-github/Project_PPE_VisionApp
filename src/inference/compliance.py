@@ -34,6 +34,15 @@ Second opinion:
     neither model could judge. Detector ``PASS`` and ``FAIL`` are never
     reopened.
 
+Where the matrix comes from:
+    With ``DATABASE_URL`` set, the matrix is read from PostgreSQL (seeded
+    from ``configs/job_matrix.yaml`` by ``cli.py db seed``, then edited by
+    the admin dashboard). It is cached for ``PPB_MATRIX_CACHE_S`` seconds.
+    If the database stops answering, the last matrix read keeps being used;
+    if none was ever read, :class:`MatrixUnavailableError` is raised and
+    the API answers 503 rather than guess. Without ``DATABASE_URL`` the YAML
+    file is used directly.
+
 Usage::
 
     from src.inference.compliance import apply_verification, check_compliance
@@ -44,6 +53,8 @@ Usage::
 
 from __future__ import annotations
 
+import threading
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -82,27 +93,101 @@ class ComplianceResult(BaseModel):
     verdict_source: str = "detector"
 
 
-@lru_cache(maxsize=1)
+class MatrixUnavailableError(RuntimeError):
+    """The database is configured but no matrix could be read from it."""
+
+
 def load_job_matrix(path: Path | None = None) -> dict[str, JobRequirements]:
-    """Load and validate the Job PPE Matrix from YAML.
+    """Return the Job PPE Matrix from the database, or from YAML.
 
     Args:
-        path: Matrix YAML path. Defaults to ``configs/job_matrix.yaml``.
+        path: Read this YAML file instead of the configured source.
 
     Returns:
-        Mapping of job category → :class:`JobRequirements`.
+        Mapping of job category → :class:`JobRequirements`, in display order.
 
     Raises:
-        FileNotFoundError: If the matrix file doesn't exist.
+        FileNotFoundError: If the YAML source is used and the file is missing.
+        MatrixUnavailableError: If ``DATABASE_URL`` is set and no matrix has
+            ever been read from it (unreachable, not migrated, or not seeded).
     """
-    path = path or settings.configs_dir / "job_matrix.yaml"
+    if path is not None:
+        return _load_yaml_matrix(path)
+    if settings.database_url:
+        return _database_matrix()
+    return _load_yaml_matrix(settings.configs_dir / "job_matrix.yaml")
+
+
+def matrix_source() -> str:
+    """Name the source :func:`load_job_matrix` reads: ``database`` or ``yaml``."""
+    return "database" if settings.database_url else "yaml"
+
+
+@lru_cache(maxsize=4)
+def _load_yaml_matrix(path: Path) -> dict[str, JobRequirements]:
     if not path.exists():
         raise FileNotFoundError(f"Job PPE Matrix not found: {path}")
-
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     matrix = {job: JobRequirements(**req) for job, req in raw.get("jobs", {}).items()}
-    logger.debug(f"Job PPE Matrix loaded: {sorted(matrix)}")
+    logger.debug(f"Job PPE Matrix loaded from {path}: {sorted(matrix)}")
     return matrix
+
+
+# Last matrix read from the database, and when (time.monotonic()).
+_db_cache: dict[str, JobRequirements] | None = None
+_db_cache_at = 0.0
+_db_lock = threading.Lock()
+
+
+def invalidate_job_matrix_cache() -> None:
+    """Forget the cached database matrix, so the next read goes to the database.
+
+    The admin API calls this after an edit. Other server processes pick the
+    change up when their cache expires (``PPB_MATRIX_CACHE_S``).
+    """
+    global _db_cache, _db_cache_at
+    with _db_lock:
+        _db_cache, _db_cache_at = None, 0.0
+
+
+def _database_matrix() -> dict[str, JobRequirements]:
+    global _db_cache, _db_cache_at
+    ttl = settings.ppb_matrix_cache_s
+    if _db_cache is not None and time.monotonic() - _db_cache_at < ttl:
+        return _db_cache
+
+    with _db_lock:
+        now = time.monotonic()
+        if _db_cache is not None and now - _db_cache_at < ttl:
+            return _db_cache  # another thread refreshed it while we waited
+
+        from sqlalchemy.exc import SQLAlchemyError  # noqa: PLC0415 — only when a DB is used
+
+        from src.db.engine import get_engine  # noqa: PLC0415
+        from src.db.matrix import read_matrix  # noqa: PLC0415
+
+        try:
+            raw = read_matrix(get_engine())
+            if not raw:
+                raise MatrixUnavailableError(
+                    "the database has no active jobs — run `cli.py db seed`"
+                )
+        except (SQLAlchemyError, MatrixUnavailableError) as exc:
+            reason = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+            if _db_cache is None:
+                raise MatrixUnavailableError(
+                    f"Job PPE Matrix unavailable from the database: {reason}"
+                ) from exc
+            # Keep serving the last good matrix, and wait a full cache period
+            # before trying again so a down database doesn't slow every check.
+            logger.warning(f"Job matrix refresh failed ({reason}); using the last good copy.")
+            _db_cache_at = now
+            return _db_cache
+
+        _db_cache = {job: JobRequirements(**req) for job, req in raw.items()}
+        _db_cache_at = now
+        logger.debug(f"Job PPE Matrix loaded from the database: {sorted(_db_cache)}")
+        return _db_cache
 
 
 def check_compliance(

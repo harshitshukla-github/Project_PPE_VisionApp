@@ -483,17 +483,32 @@ LOG_LEVEL=INFO
 
 ## 14. Phased Roadmap
 
-| Phase | Milestone                                 | Status      |
-|-------|-------------------------------------------|-------------|
-| P0    | Stack selection & architecture            | ✅ Complete  |
-| P1    | Vision module — dual YOLO training        | 🔄 Current  |
-| P2    | FastAPI inference server + compliance API | ⬜ Next      |
-| P3    | React Native mobile app (camera + upload) | ⬜ Planned   |
-| P4    | Gemini hybrid explanations                | ⬜ Planned   |
-| P5    | Job PPE Matrix + admin panel (Next.js)    | ⬜ Planned   |
-| P6    | PostgreSQL + GCP Storage integration      | ⬜ Planned   |
-| P7    | Firebase Auth + worker identity           | ⬜ Planned   |
-| P8    | Live video mode                           | ⬜ Future    |
+| Phase | Milestone                                             | Status      |
+|-------|-------------------------------------------------------|-------------|
+| P0    | Stack selection & architecture                        | ✅ Complete  |
+| P1    | Vision module — dual YOLO training                    | ✅ Complete  |
+| P2    | FastAPI inference server + compliance API             | ✅ Complete  |
+| P3    | React Native mobile app (camera + upload)             | ✅ Merged — on-device end-to-end test pending |
+| P4    | Gemini explanations + second opinion on NEEDS_REVIEW  | ✅ Complete  |
+| P5    | Job PPE Matrix in PostgreSQL + admin dashboard (React + Vite) | 🔄 Current — matrix in Postgres done |
+| P6    | Worker photo storage (kept for model training)        | ⬜ Planned   |
+| P7    | Login: admin & supervisor accounts, worker login (built into FastAPI) | ⬜ Next |
+| P8    | Live video mode                                       | ⬜ Future    |
+
+---
+
+## 15. Admin System — Decisions (2026-10-15)
+
+| Decision | Choice | Why |
+|---|---|---|
+| Backend | FastAPI stays the only backend; it owns PostgreSQL (SQLAlchemy 2, Alembic, psycopg 3) and login | The rules that decide a verdict live in one place |
+| Dashboard | React + Vite + TypeScript, served by FastAPI at `/admin` | Same origin as the API, so session cookies need no cross-site setup. Next.js was dropped: a second server that either shares the database (two schema owners) or only calls FastAPI (its server features unused) |
+| Login | Built into FastAPI: hashed passwords, server-side sessions in Postgres. Firebase Auth dropped | A handful of accounts, data stays in our database, no outside dependency |
+| Roles | `admin` and `supervisor` | Admin edits the matrix, settings and users; supervisor reviews checks |
+| Worker login | In scope for this round: worker ID + PIN, issued by a supervisor in the dashboard; PIN attempts rate-limited with lockout; the check's `worker_id` comes from the login, not a typed field | Ties each check to a real worker. Site workers often have no email, and SMS codes cost per message |
+| Worker photos | Persisted, for future model training | Needs a consent notice in the app, restricted access, and a way to delete a worker's photos on request |
+| Job matrix | Lives in PostgreSQL; `configs/job_matrix.yaml` only seeds an empty database (`cli.py db seed`) and serves when `DATABASE_URL` is unset | The dashboard edits the matrix centrally |
+| CI | GitHub Actions on every pull request; both jobs must pass before merging into `main`, admins included | Merges used to rely on local test runs alone |
 
 ---
 
