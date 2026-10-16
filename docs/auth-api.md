@@ -1,11 +1,11 @@
 # Phase 2 — Login API contract
 
-**Status: under review by Harshit and Priyanka. The backend is built to
-this draft (§1–§7); the mobile app and dashboard parts (§8) are not started.**
+**Status: agreed (merged 2026-10-16). The backend (§1–§7) is built and on
+`main`; the mobile app and dashboard parts (§8) are in progress.**
 
-Once both of you agree on this document, the backend, the mobile app and the
-admin dashboard are built against it in parallel. Any change after that goes
-through a pull request that edits this file first.
+The backend, the mobile app and the admin dashboard are built against this
+document. Any change from now on goes through a pull request that edits this
+file first.
 
 All paths are under `/api/v1`. Requests and responses are JSON unless noted.
 
@@ -351,14 +351,23 @@ uv run python cli.py auth reset-pin --worker-id W-0042
 - **The issued PIN is temporary**, so a supervisor never knows the PIN a
   worker actually uses.
 
-## 10. Open questions for review
+## 10. Decisions on the review questions
 
-1. **Worker session length.** 12 hours means one sign-in per shift. A longer
-   session is more convenient on a personal phone, but weaker on a shared site
-   phone.
-2. **History on shared phones.** Keep each worker's history on the device and
-   show only theirs, or clear it at logout?
-3. **Checks on someone's behalf.** Should a supervisor be able to run a check
-   for a worker without a phone? This is not in Phase 2 as written.
-4. **Worker ID format.** Is "2–32 letters, digits and hyphens" compatible with
-   the IDs your sites already use?
+The review raised four questions. No objection was made when the contract
+merged, so these are the answers in force. Changing one is a pull request
+against this file.
+
+1. **Worker session length: 12 hours,** one sign-in per shift
+   (`PPB_WORKER_SESSION_HOURS`). Chosen for shared site phones; a longer
+   session would be more convenient on personal phones but leaves a check
+   open to whoever picks the phone up next.
+2. **History on shared phones: decided in the app.** Recommendation: keep
+   history on the device, but show each worker only their own checks, and
+   never another worker's photos. Whichever is chosen, record it here.
+3. **Checks on someone's behalf: not supported in Phase 2.** Every check is
+   run by the worker who is signed in. Revisit if sites need supervisors to
+   check workers who have no phone.
+4. **Worker ID format: 2–32 letters, digits and hyphens, not starting with a
+   hyphen,** stored in upper case (e.g. `W-0042`). The database enforces it.
+   If a site's existing IDs don't fit, widen the rule here and in the
+   database (with a new migration) before creating those workers.
