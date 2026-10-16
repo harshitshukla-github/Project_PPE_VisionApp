@@ -110,7 +110,11 @@ Base URL: `http://<SERVER_IP>:8000/api/v1`
 `multipart/form-data`:
 - `image` — the photo file (JPEG). In RN FormData:
   `{ uri, name: "photo.jpg", type: "image/jpeg" }`
-- `worker_id` — string
+- `worker_id` — string. Once the app has worker login, send
+  `Authorization: Bearer <token>` instead: the server then takes the worker
+  from the token and ignores this field. Until the server is switched to
+  `PPB_WORKER_AUTH=required`, requests without a token keep working as now.
+  Full login contract: [`docs/auth-api.md`](docs/auth-api.md).
 - `job_category` — string key from `GET /jobs`
 
 Response `200`:

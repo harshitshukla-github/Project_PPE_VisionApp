@@ -64,6 +64,13 @@ db_app = typer.Typer(
 )
 app.add_typer(db_app, name="db")
 
+auth_app = typer.Typer(
+    help="Accounts: create the first admin, create workers, reset PINs.",
+    rich_markup_mode="markdown",
+    no_args_is_help=True,
+)
+app.add_typer(auth_app, name="auth")
+
 console = Console()
 
 # ---------------------------------------------------------------------------
@@ -1004,6 +1011,100 @@ def db_seed_cmd(
         console.print(f"Jobs not loaded: {report.skipped_reason}.")
     else:
         console.print(f"Jobs added: {report.jobs_added} (from {matrix_file})")
+
+
+# ---------------------------------------------------------------------------
+# auth commands (docs/auth-api.md §7)
+# ---------------------------------------------------------------------------
+
+def _auth_db():
+    """A database session for an auth command, or exit with the fix."""
+    from sqlalchemy.orm import Session
+
+    from src.db.engine import get_engine
+
+    if not settings.database_url:
+        console.print("[red]DATABASE_URL is not set — run `cli.py db setup` first.[/red]")
+        raise typer.Exit(code=1)
+    # Keep loaded values after commit: the command prints them once the
+    # session has closed.
+    return Session(get_engine(), expire_on_commit=False)
+
+
+def _run_account_command(action):
+    """Run ``action(db)``, turning the expected failures into one red line."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    with _auth_db() as db:
+        try:
+            return action(db)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from None
+        except SQLAlchemyError as exc:
+            console.print(
+                f"[red]Database error:[/red] {str(exc).splitlines()[0]}\n"
+                "Run `cli.py db migrate` if the login tables don't exist yet."
+            )
+            raise typer.Exit(code=1) from None
+
+
+def _print_one_time_pin(worker_code: str, name: str, pin: str) -> None:
+    console.print(
+        Panel.fit(
+            f"Worker [bold]{worker_code}[/bold] ({name})\n"
+            f"One-time PIN: [bold]{pin}[/bold]\n\n"
+            "Hand this to the worker. They must choose their own PIN at first\n"
+            "login. It is not stored anywhere and can't be shown again.",
+            title="New PIN",
+        )
+    )
+
+
+@auth_app.command("create-admin")
+def auth_create_admin_cmd(
+    email: str = typer.Option(..., "--email", help="The admin's email; used to sign in."),
+    name: str = typer.Option(..., "--name", help="Name shown in the dashboard."),
+) -> None:
+    """
+    Create a dashboard **admin**. Asks for the password twice (hidden).
+
+    The only way to create the first account: there is no sign-up.
+    """
+    from src.auth.service import create_user
+    from src.db.models import Role
+
+    password = typer.prompt("Password (at least 12 characters)", hide_input=True,
+                            confirmation_prompt=True)
+    user = _run_account_command(
+        lambda db: create_user(db, email, name, Role.ADMIN, password)
+    )
+    console.print(f"[green]Created admin {user.email}.[/green]")
+
+
+@auth_app.command("create-worker")
+def auth_create_worker_cmd(
+    worker_id: str = typer.Option(..., "--worker-id", help="e.g. W-0042"),
+    name: str = typer.Option(..., "--name", help="The worker's name."),
+) -> None:
+    """Create a worker and print their **one-time PIN**."""
+    from src.auth.service import create_worker
+
+    worker, pin = _run_account_command(lambda db: create_worker(db, worker_id, name))
+    _print_one_time_pin(worker.worker_code, worker.display_name, pin)
+
+
+@auth_app.command("reset-pin")
+def auth_reset_pin_cmd(
+    worker_id: str = typer.Option(..., "--worker-id", help="e.g. W-0042"),
+) -> None:
+    """
+    Issue a new **one-time PIN**, unlock the worker, and sign them out everywhere.
+    """
+    from src.auth.service import reset_worker_pin
+
+    worker, pin = _run_account_command(lambda db: reset_worker_pin(db, worker_id))
+    _print_one_time_pin(worker.worker_code, worker.display_name, pin)
 
 
 # ---------------------------------------------------------------------------

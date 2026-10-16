@@ -13,6 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 
 from src.api.deps import get_detector
+from src.auth.deps import SignedInWorker, worker_for_check, worker_or_user_when_required
 from src.inference.compliance import (
     JobRequirements,
     MatrixUnavailableError,
@@ -160,6 +161,7 @@ def model_info(detector: PPEDetector = Depends(get_detector)) -> ModelInfoRespon
 async def detect(
     image: UploadFile = File(..., description="Worker photo (JPEG/PNG)."),
     detector: PPEDetector = Depends(get_detector),
+    _signed_in: None = Depends(worker_or_user_when_required),
 ) -> DetectionResponse:
     """Raw PPE detection — bounding boxes only, no compliance logic."""
     array = await _decode_upload(image)
@@ -177,9 +179,14 @@ async def detect(
 @router.post("/compliance/check", response_model=ComplianceResponse)
 async def compliance_check(
     image: UploadFile = File(..., description="Worker photo (JPEG/PNG)."),
-    worker_id: str = Form(..., description="Worker identifier, e.g. 'W-0042'."),
     job_category: str = Form(..., description="Job key from the PPE matrix."),
+    worker_id: str | None = Form(
+        None,
+        description="Worker identifier, e.g. 'W-0042'. Ignored when the request "
+        "carries a worker token; required without one (docs/auth-api.md §5).",
+    ),
     detector: PPEDetector = Depends(get_detector),
+    signed_in: SignedInWorker | None = Depends(worker_for_check),
 ) -> ComplianceResponse:
     """Full compliance check: detect → verify against Job PPE Matrix →
     Gemini second opinion when the detector is unsure → explanation on FAIL.
@@ -198,6 +205,14 @@ async def compliance_check(
     costs one vision call and a few seconds. If Gemini is switched off or
     unreachable, step 2 is skipped and the verdict stays ``NEEDS_REVIEW``.
     """
+    if signed_in is not None:
+        worker_id = signed_in.worker_id
+    elif not worker_id:
+        raise HTTPException(
+            status_code=422,
+            detail="worker_id is required when the request is not signed in.",
+        )
+
     matrix = _job_matrix_or_503()
     if job_category not in matrix:
         raise HTTPException(
@@ -231,7 +246,8 @@ async def compliance_check(
         gemini_invoked = True
 
     logger.info(
-        f"[{worker_id}] {job_category}: {result.verdict.value} "
+        f"[{worker_id}{'' if signed_in else ', not signed in'}] "
+        f"{job_category}: {result.verdict.value} "
         f"(decided by {result.verdict_source})"
     )
     return ComplianceResponse(

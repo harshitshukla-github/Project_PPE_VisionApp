@@ -12,7 +12,11 @@ from typing import Iterator
 
 import numpy as np
 import pytest
+from sqlalchemy import text
 
+from src.db.engine import get_engine
+from src.db.matrix import seed_from_yaml
+from src.db.migrate import upgrade_to_head
 from src.inference.compliance import invalidate_job_matrix_cache
 from src.inference.schemas import Detection
 from src.settings import settings
@@ -35,6 +39,48 @@ def _fresh_job_matrix_cache() -> Iterator[None]:
     invalidate_job_matrix_cache()
     yield
     invalidate_job_matrix_cache()
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL (TEST_DATABASE_URL)
+# ---------------------------------------------------------------------------
+
+TEST_DB_URL = settings.test_database_url
+MATRIX_YAML = Path("configs/job_matrix.yaml")
+
+
+@pytest.fixture
+def empty_db():
+    """An engine on the test database, with every table dropped.
+
+    Skips when TEST_DATABASE_URL is not set, and refuses any database whose
+    name doesn't end in _test, because this wipes it.
+    """
+    if not TEST_DB_URL:
+        pytest.skip("TEST_DATABASE_URL not set — run `cli.py db setup`")
+    dbname = TEST_DB_URL.rsplit("/", 1)[-1].split("?", 1)[0]
+    if not dbname.endswith("_test"):
+        pytest.fail(f"refusing to wipe '{dbname}': TEST_DATABASE_URL must name a *_test database")
+
+    engine = get_engine(TEST_DB_URL)
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+    return engine
+
+
+@pytest.fixture
+def migrated_db(empty_db):
+    """The test database at the latest schema, with no data."""
+    upgrade_to_head(TEST_DB_URL)
+    return empty_db
+
+
+@pytest.fixture
+def seeded_db(migrated_db):
+    """The test database at the latest schema, with the YAML job matrix loaded."""
+    seed_from_yaml(migrated_db, MATRIX_YAML)
+    return migrated_db
 
 
 # ---------------------------------------------------------------------------

@@ -492,7 +492,7 @@ LOG_LEVEL=INFO
 | P4    | Gemini explanations + second opinion on NEEDS_REVIEW  | ✅ Complete  |
 | P5    | Job PPE Matrix in PostgreSQL + admin dashboard (React + Vite) | 🔄 Current — matrix in Postgres done |
 | P6    | Worker photo storage (kept for model training)        | ⬜ Planned   |
-| P7    | Login: admin & supervisor accounts, worker login (built into FastAPI) | ⬜ Next |
+| P7    | Login: admin & supervisor accounts, worker login (built into FastAPI; contract `docs/auth-api.md`) | 🔄 Current — backend built; app and dashboard pending |
 | P8    | Live video mode                                       | ⬜ Future    |
 
 ---

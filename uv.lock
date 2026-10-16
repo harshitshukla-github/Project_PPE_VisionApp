@@ -3183,6 +3183,7 @@ source = { editable = "." }
 dependencies = [
     { name = "albumentations" },
     { name = "alembic" },
+    { name = "argon2-cffi" },
     { name = "fastapi" },
     { name = "google-genai" },
     { name = "ipywidgets" },
@@ -3227,6 +3228,7 @@ dependencies = [
 requires-dist = [
     { name = "albumentations", specifier = ">=1.4.0" },
     { name = "alembic", specifier = ">=1.13" },
+    { name = "argon2-cffi", specifier = ">=23.1" },
     { name = "fastapi", specifier = ">=0.111.0" },
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "ipywidgets", specifier = ">=8.1.0" },
