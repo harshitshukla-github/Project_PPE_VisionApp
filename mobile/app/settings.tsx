@@ -1,3 +1,4 @@
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -11,6 +12,7 @@ import {
 
 import { ApiError, getHealth, getServerUrl, setServerUrl } from "../src/api/client";
 import type { HealthResponse } from "../src/api/types";
+import { useSession } from "../src/context/SessionContext";
 
 type ConnectionStatus =
   | { kind: "idle" }
@@ -26,6 +28,8 @@ type ConnectionStatus =
  * phone itself) and verifies it against GET /health.
  */
 export default function SettingsScreen() {
+  const router = useRouter();
+  const { auth, signOut } = useSession();
   const [urlInput, setUrlInput] = useState("");
   const [status, setStatus] = useState<ConnectionStatus>({ kind: "idle" });
 
@@ -61,6 +65,12 @@ export default function SettingsScreen() {
     await setServerUrl(trimmed);
     setUrlInput(trimmed.replace(/\/+$/, ""));
     await checkConnection();
+  }
+
+  async function handleLogOut() {
+    await signOut();
+    // Settings is a modal over the app; replace it so Login is what's left.
+    router.replace("/login");
   }
 
   return (
@@ -115,6 +125,23 @@ export default function SettingsScreen() {
           </Text>
         )}
       </View>
+
+      {auth.kind === "signedIn" && (
+        <View style={styles.account}>
+          <Text style={styles.label}>Account</Text>
+          <Text style={styles.statusText}>
+            Signed in as {auth.worker.display_name} ({auth.worker.worker_id})
+          </Text>
+          <Pressable
+            testID="logout-button"
+            style={styles.logoutButton}
+            onPress={handleLogOut}
+            accessibilityRole="button"
+          >
+            <Text style={styles.logoutText}>Log out</Text>
+          </Pressable>
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -169,6 +196,25 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 14,
+  },
+  account: {
+    marginTop: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#ddd",
+    gap: 8,
+  },
+  logoutButton: {
+    borderWidth: 1,
+    borderColor: "#c0392b",
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  logoutText: {
+    color: "#c0392b",
+    fontWeight: "600",
+    fontSize: 15,
   },
   connected: {
     color: "#1a7f37",

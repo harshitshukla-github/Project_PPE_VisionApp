@@ -1,11 +1,19 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import * as SecureStore from "expo-secure-store";
+
 import {
+  changeWorkerPin,
+  clearToken,
   getHealth,
   getJobs,
   getServerUrl,
+  getToken,
   postComplianceCheck,
   setServerUrl,
+  setToken,
+  workerLogin,
+  workerLogout,
 } from "../client";
 
 // The community AsyncStorage package ships an official in-memory jest mock —
@@ -20,6 +28,7 @@ global.fetch = mockFetch;
 
 beforeEach(async () => {
   await AsyncStorage.clear();
+  await clearToken();
   mockFetch.mockReset();
 });
 
@@ -134,7 +143,7 @@ describe("getHealth / getJobs happy paths", () => {
 });
 
 describe("postComplianceCheck", () => {
-  it("POSTs multipart form data with image, worker_id, and job_category to /compliance/check", async () => {
+  it("POSTs multipart form data with image and job_category to /compliance/check", async () => {
     await setServerUrl("http://192.168.1.5:8000");
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -143,7 +152,6 @@ describe("postComplianceCheck", () => {
 
     await postComplianceCheck({
       imageUri: "file:///tmp/photo.jpg",
-      workerId: "W-0042",
       jobCategory: "welder",
     });
 

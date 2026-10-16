@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react-native";
 
 import HistoryDetailScreen from "../history-detail";
 import { SessionProvider } from "../../src/context/SessionContext";
+import { SIGNED_IN } from "../../src/testing/fixtures";
 import { addHistoryEntry } from "../../src/storage/history";
 import type { ComplianceCheckResponse } from "../../src/api/types";
 
@@ -37,7 +38,7 @@ const FAIL_RESULT: ComplianceCheckResponse = {
 
 function renderDetail() {
   return render(
-    <SessionProvider>
+    <SessionProvider initialAuth={SIGNED_IN}>
       <HistoryDetailScreen />
     </SessionProvider>,
   );

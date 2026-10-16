@@ -45,7 +45,8 @@
           "faceIDPermission": "Allow the app to use Face ID to confirm your identity."
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-secure-store"
     ]
   }
 }

@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react-native";
 
 import HistoryScreen from "../(tabs)/history";
 import { SessionProvider } from "../../src/context/SessionContext";
+import { SIGNED_IN } from "../../src/testing/fixtures";
 import { addHistoryEntry } from "../../src/storage/history";
 import type { ComplianceCheckResponse } from "../../src/api/types";
 
@@ -37,16 +38,24 @@ const PASS_RESULT: ComplianceCheckResponse = {
 
 const FAIL_RESULT: ComplianceCheckResponse = {
   ...PASS_RESULT,
-  worker_id: "W-0099",
+  worker_id: "W-0042",
   job_category: "general_labor",
   timestamp: "2026-07-30T09:00:00.000Z",
   verdict: "FAIL",
   missing_equipment: ["hardhat"],
 };
 
+/** A check made on this phone by someone else (e.g. a shared site phone). */
+const OTHER_WORKER_RESULT: ComplianceCheckResponse = {
+  ...PASS_RESULT,
+  worker_id: "W-0099",
+  job_category: "general_labor",
+  timestamp: "2026-07-31T09:00:00.000Z",
+};
+
 function renderHistory() {
   return render(
-    <SessionProvider>
+    <SessionProvider initialAuth={SIGNED_IN}>
       <HistoryScreen />
     </SessionProvider>,
   );
@@ -92,8 +101,26 @@ describe("HistoryScreen", () => {
     expect(screen.getByText("General Labor")).toBeTruthy();
     expect(screen.getByText("PASS")).toBeTruthy();
     expect(screen.getByText("Welder")).toBeTruthy();
-    expect(screen.getByText(/W-0099/)).toBeTruthy();
-    expect(screen.getByText(/W-0042/)).toBeTruthy();
+    expect(screen.getAllByText(/W-0042/)).toHaveLength(2);
+  });
+
+  it("shows only the signed-in worker's checks on a shared phone", async () => {
+    await addHistoryEntry(PASS_RESULT, "file:///mine.jpg");
+    await addHistoryEntry(OTHER_WORKER_RESULT, "file:///theirs.jpg");
+
+    renderHistory();
+
+    expect(await screen.findByText("Welder")).toBeTruthy();
+    expect(screen.queryByText("General Labor")).toBeNull();
+    expect(screen.queryByText(/W-0099/)).toBeNull();
+  });
+
+  it("matches the worker ID without regard to case, as the server does", async () => {
+    await addHistoryEntry({ ...PASS_RESULT, worker_id: "w-0042" }, "file:///lower.jpg");
+
+    renderHistory();
+
+    expect(await screen.findByText("Welder")).toBeTruthy();
   });
 
   it("logs a NEEDS_REVIEW check as amber REVIEW, never as a red FAIL", async () => {

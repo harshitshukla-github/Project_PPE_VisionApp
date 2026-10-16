@@ -1,9 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react-native";
-import { useEffect } from "react";
+import { Text } from "react-native";
 
 import CaptureScreen from "../(tabs)/capture";
+import { clearToken, setToken } from "../../src/api/client";
 import { SessionProvider, useSession } from "../../src/context/SessionContext";
+import { SIGNED_IN } from "../../src/testing/fixtures";
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
@@ -66,26 +68,30 @@ const CHECK_RESPONSE = {
   gemini_invoked: false,
 };
 
-/** Seeds SessionContext.workerId before CaptureScreen renders. */
-function Seed({ workerId }: { workerId: string }) {
-  const { setWorkerId } = useSession();
-  useEffect(() => {
-    setWorkerId(workerId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return null;
+/** Shows the session state so tests can see what Capture did to it. */
+function AuthProbe() {
+  const { auth } = useSession();
+  const label =
+    auth.kind !== "signedIn"
+      ? "signed-out"
+      : auth.mustChangePin
+        ? "must-change-pin"
+        : "signed-in";
+  return <Text testID="auth-probe">{label}</Text>;
 }
 
-function renderCapture({ withIdentity = true } = {}) {
+function renderCapture() {
   return render(
-    <SessionProvider>
-      {withIdentity && <Seed workerId="W-0042" />}
+    <SessionProvider initialAuth={SIGNED_IN}>
+      <AuthProbe />
       <CaptureScreen />
     </SessionProvider>,
   );
 }
 
 beforeEach(async () => {
+  await clearToken();
+  await setToken("test-token");
   await AsyncStorage.clear();
   await AsyncStorage.setItem("@ppb/server_url", "http://192.168.1.5:8000");
   mockFetch.mockReset();
@@ -100,12 +106,12 @@ beforeEach(async () => {
 });
 
 describe("CaptureScreen", () => {
-  it("prompts to set up identity on Home when worker ID / job aren't set", async () => {
-    renderCapture({ withIdentity: false });
+  it("prompts to pick a job on Home while no job category is loaded", async () => {
+    mockFetch.mockReset();
+    mockFetch.mockRejectedValueOnce(new TypeError("Network request failed"));
+    renderCapture();
 
-    expect(
-      await screen.findByText(/Enter your Worker ID and pick a job category/),
-    ).toBeTruthy();
+    expect(await screen.findByText(/Pick a job category on Home first/)).toBeTruthy();
   });
 
   it("prompts for camera permission when not yet granted", async () => {
@@ -139,6 +145,83 @@ describe("CaptureScreen", () => {
       "http://192.168.1.5:8000/api/v1/compliance/check",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("identifies the worker by token only: sends Authorization and no worker_id field", async () => {
+    renderCapture();
+    await screen.findByText("Fit your full body in frame");
+
+    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => CHECK_RESPONSE });
+
+    fireEvent.press(screen.getByTestId("shutter-button"));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
+
+    const [, init] = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
+    expect(init.headers).toEqual({ Authorization: "Bearer test-token" });
+    const body = init.body as FormData;
+    expect(body.has("job_category")).toBe(true);
+    expect(body.has("worker_id")).toBe(false);
+  });
+
+  it("sends the worker back to sign in when the session has ended (401 not_authenticated)", async () => {
+    renderCapture();
+    await screen.findByText("Fit your full body in frame");
+
+    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ detail: "Sign in again.", code: "not_authenticated" }),
+    });
+
+    fireEvent.press(screen.getByTestId("shutter-button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("auth-probe")).toHaveTextContent("signed-out"),
+    );
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("opens Change PIN when the issued PIN must be replaced (403 pin_change_required)", async () => {
+    renderCapture();
+    await screen.findByText("Fit your full body in frame");
+
+    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        detail: "Choose your own PIN first.",
+        code: "pin_change_required",
+      }),
+    });
+
+    fireEvent.press(screen.getByTestId("shutter-button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("auth-probe")).toHaveTextContent("must-change-pin"),
+    );
+  });
+
+  it("shows 'try again shortly' and no verdict when the server answers 503", async () => {
+    renderCapture();
+    await screen.findByText("Fit your full body in frame");
+
+    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        detail: "Job requirements are temporarily unavailable. Try again shortly.",
+      }),
+    });
+
+    fireEvent.press(screen.getByTestId("shutter-button"));
+
+    expect(await screen.findByText(/Try again shortly/)).toBeTruthy();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(screen.getByTestId("auth-probe")).toHaveTextContent("signed-in");
   });
 
   it("shows an inline error banner when the check request fails", async () => {
