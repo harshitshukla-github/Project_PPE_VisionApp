@@ -1,0 +1,150 @@
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --text: #1c1f23;
+  --muted: #5d6670;
+  --border: #cfd4da;
+  --accent: #1d6fd6;
+  --error-bg: #fdecea;
+  --error: #c0392b;
+  --notice-bg: #fff4e0;
+  --notice: #8a5a0b;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a;
+    --surface: #1d2126;
+    --text: #e8eaed;
+    --muted: #9aa3ad;
+    --border: #3a4047;
+    --accent: #5aa2f5;
+    --error-bg: #3a1d1a;
+    --error: #ff8a7d;
+    --notice-bg: #372b12;
+    --notice: #f0c36d;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.45;
+}
+
+.card {
+  max-width: 28rem;
+  margin: 3rem auto;
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+@media (max-width: 30rem) {
+  .card {
+    margin: 0;
+    border-radius: 0;
+    min-height: 100vh;
+  }
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.4rem;
+}
+
+.hint {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+input {
+  padding: 0.6rem 0.75rem;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+button {
+  padding: 0.65rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.link {
+  margin-top: 1rem;
+  padding: 0;
+  color: var(--accent);
+  background: none;
+}
+
+.bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.bar button.link {
+  margin-top: 0.3rem;
+}
+
+.banner {
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: 1px solid;
+  border-radius: 0.5rem;
+}
+
+.banner-error {
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--error);
+}
+
+.banner-notice {
+  color: var(--notice);
+  background: var(--notice-bg);
+  border-color: var(--notice);
+}
+
+.field-error {
+  margin: -0.4rem 0 0;
+  color: var(--error);
+  font-size: 0.85rem;
+}
