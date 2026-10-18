@@ -7,6 +7,20 @@ jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
 );
 
+const mockReplace = jest.fn();
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ replace: mockReplace, push: jest.fn() }),
+}));
+
+// Settings only needs the sign-in state and signOut; no provider (and no jobs fetch) required.
+const mockSignOut = jest.fn();
+let mockAuth: { kind: string; worker?: { worker_id: string; display_name: string } } = {
+  kind: "signedOut",
+};
+jest.mock("../../src/context/SessionContext", () => ({
+  useSession: () => ({ auth: mockAuth, signOut: mockSignOut }),
+}));
+
 const mockFetch = jest.fn();
 // @ts-expect-error - test-only global fetch stub
 global.fetch = mockFetch;
@@ -14,6 +28,33 @@ global.fetch = mockFetch;
 beforeEach(async () => {
   await AsyncStorage.clear();
   mockFetch.mockReset();
+  mockReplace.mockReset();
+  mockSignOut.mockReset();
+  mockSignOut.mockResolvedValue(undefined);
+  mockAuth = { kind: "signedOut" };
+});
+
+describe("SettingsScreen account section", () => {
+  it("hides Log out while nobody is signed in (Settings is reachable from Login)", async () => {
+    render(<SettingsScreen />);
+
+    await screen.findByText("Not tested yet.");
+    expect(screen.queryByTestId("logout-button")).toBeNull();
+  });
+
+  it("shows who is signed in and logs out, then lands on Login", async () => {
+    mockAuth = {
+      kind: "signedIn",
+      worker: { worker_id: "W-0042", display_name: "Test Worker" },
+    };
+    render(<SettingsScreen />);
+
+    expect(await screen.findByText("Signed in as Test Worker (W-0042)")).toBeTruthy();
+    fireEvent.press(screen.getByTestId("logout-button"));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/login"));
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("SettingsScreen", () => {

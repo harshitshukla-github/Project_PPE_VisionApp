@@ -29,9 +29,14 @@ missing equipment, and (on FAIL) a friendly Gemini-written explanation.
 
 A simple, robust compliance-check app for workers. Four screens:
 
-1. **Home / Identify** — worker enters (or the app remembers) their
-   `worker_id`; picks a `job_category` from a dropdown **populated from
-   `GET /api/v1/jobs`** (never hardcode the job list).
+0. **Login / Change PIN** — worker ID + 6-digit PIN
+   ([`docs/auth-api.md`](docs/auth-api.md) §4). Nothing else is reachable
+   until the worker is signed in; a PIN still on the supervisor-issued
+   value goes to Change PIN first. Log out is in Settings.
+1. **Home / Identify** — shows who is signed in (the `worker_id` comes from
+   the login token, not a typed field); picks a `job_category` from a
+   dropdown **populated from `GET /api/v1/jobs`** (never hardcode the job
+   list).
 2. **Capture** — camera preview → take photo (or pick from gallery for
    testing). Front camera default, full-body framing hint overlay.
 3. **Result** — three verdicts, three distinct treatments:
@@ -93,7 +98,7 @@ on the result photo using the `detections` array.
 | Navigation | expo-router | File-based, simple |
 | Camera | expo-camera + expo-image-picker | Picker enables emulator/desktop testing |
 | State | React hooks + context; no Redux | App is small |
-| Storage | @react-native-async-storage/async-storage | History + remembered worker_id |
+| Storage | @react-native-async-storage/async-storage; **expo-secure-store** for the login token | History + last worker_id (pre-fills Login); the token never goes in AsyncStorage |
 | HTTP | `fetch` with `FormData` | No axios needed |
 | Location | New top-level folder **`mobile/`** in this repo | Keep monorepo simple |
 

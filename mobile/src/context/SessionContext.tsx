@@ -2,28 +2,56 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
 
 import {
   ApiError,
+  changeWorkerPin,
+  clearToken,
   getJobs,
-  getWorkerId,
-  setWorkerId as persistWorkerId,
+  getToken,
+  getWorkerMe,
+  setToken,
+  setWorkerId as rememberWorkerId,
+  workerLogin,
+  workerLogout,
 } from "../api/client";
-import type { ComplianceCheckResponse, JobsResponse } from "../api/types";
+import { problemFrom, type Problem } from "../api/problems";
+import type { ComplianceCheckResponse, JobsResponse, WorkerInfo } from "../api/types";
 import { addHistoryEntry, getHistory, type HistoryEntry } from "../storage/history";
 
 export type JobsStatus =
   | { kind: "loading" }
   | { kind: "loaded"; jobs: JobsResponse }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; tone: Problem["tone"] };
+
+/**
+ * Who is using the app. `loading` lasts only until the saved token has been
+ * checked with the server; routing treats it like signedOut so the Login
+ * screen (showing a spinner) is what's on screen meanwhile.
+ */
+export type AuthState =
+  | { kind: "loading" }
+  | { kind: "signedOut"; notice?: Problem }
+  | { kind: "signedIn"; worker: WorkerInfo; mustChangePin: boolean };
 
 interface SessionState {
-  /** Worker ID entered on Home, remembered across launches (AsyncStorage). */
+  auth: AuthState;
+  /** Signed-in worker's ID, or "" when signed out. */
   workerId: string;
-  setWorkerId: (id: string) => void;
+  /** Resolves on success; rejects with the ApiError so the Login screen can show why. */
+  signIn: (workerId: string, pin: string) => Promise<void>;
+  /** Replaces the issued PIN. Rejects with the ApiError on a weak or wrong PIN. */
+  changePin: (currentPin: string, newPin: string) => Promise<void>;
+  /** POST /auth/worker/logout, then forget the token whatever the response. */
+  signOut: () => Promise<void>;
+  /** The server said our token is dead (401 not_authenticated): back to Login with a note. */
+  expireSession: () => void;
+  /** The server said 403 pin_change_required: open the Change PIN screen. */
+  requirePinChange: () => void;
 
   /** GET /jobs result, shared so Capture doesn't need to re-fetch. */
   jobsStatus: JobsStatus;
@@ -37,7 +65,11 @@ interface SessionState {
   lastImageUri: string | null;
   recordCheck: (result: ComplianceCheckResponse, imageUri: string) => void;
 
-  /** Past checks, most-recent-first — local on-device log (INSTRUCTIONS.md §2). */
+  /**
+   * The signed-in worker's past checks, most-recent-first — local on-device
+   * log (INSTRUCTIONS.md §2). Other workers' checks stay on the phone but are
+   * never shown (docs/auth-api.md §10, open question 2).
+   */
   history: HistoryEntry[];
   /** False until the initial AsyncStorage read completes — lets History tell "loading" from "genuinely empty". */
   historyLoaded: boolean;
@@ -45,34 +77,66 @@ interface SessionState {
 
 const SessionContext = createContext<SessionState | undefined>(undefined);
 
+const SESSION_ENDED: Problem = { message: "Your session ended. Sign in again.", tone: "error" };
+
 /**
  * App-wide session state — per INSTRUCTIONS.md §3 ("React hooks + context;
- * no Redux"). Holds the worker identity + job selected on Home so Capture
- * and Result can read them without prop-drilling through the tab navigator,
- * and holds the last check result so Result can render it after Capture
+ * no Redux"). Holds who is signed in, the job selected on Home so Capture
+ * and Result can read it without prop-drilling through the tab navigator,
+ * and the last check result so Result can render it after Capture
  * navigates there.
+ *
+ * @param initialAuth Starts in a known sign-in state and skips the saved-token
+ *   check — for tests, where there is no server to ask.
  */
-export function SessionProvider({ children }: { children: ReactNode }) {
-  const [workerId, setWorkerIdState] = useState("");
+export function SessionProvider({
+  children,
+  initialAuth,
+}: {
+  children: ReactNode;
+  initialAuth?: AuthState;
+}) {
+  const [auth, setAuth] = useState<AuthState>(initialAuth ?? { kind: "loading" });
   const [jobsStatus, setJobsStatus] = useState<JobsStatus>({ kind: "loading" });
   const [jobCategory, setJobCategory] = useState<string | null>(null);
   const [lastCheck, setLastCheck] = useState<ComplianceCheckResponse | null>(null);
   const [lastImageUri, setLastImageUri] = useState<string | null>(null);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [allHistory, setAllHistory] = useState<HistoryEntry[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      const saved = await getWorkerId();
-      if (saved) setWorkerIdState(saved);
-    })();
+    if (!initialAuth) void restoreSession();
     reloadJobs();
     (async () => {
-      setHistory(await getHistory());
+      setAllHistory(await getHistory());
       setHistoryLoaded(true);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Is the saved token still good? A reachable server decides; an unreachable one just asks for a fresh sign-in. */
+  async function restoreSession() {
+    const token = await getToken();
+    if (!token) {
+      setAuth({ kind: "signedOut" });
+      return;
+    }
+    try {
+      const me = await getWorkerMe();
+      setAuth({ kind: "signedIn", worker: me.worker, mustChangePin: me.must_change_pin });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await clearToken();
+        setAuth({ kind: "signedOut", notice: SESSION_ENDED });
+      } else {
+        // Server down or unreachable: keep the token, but we can't prove who this is.
+        setAuth({
+          kind: "signedOut",
+          notice: problemFrom(err, "Couldn't check your sign-in. Try again."),
+        });
+      }
+    }
+  }
 
   async function reloadJobs() {
     setJobsStatus({ kind: "loading" });
@@ -83,29 +147,73 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         current && jobs[current] ? current : Object.keys(jobs)[0] ?? null,
       );
     } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message : "Unexpected error loading jobs.";
-      setJobsStatus({ kind: "error", message });
+      const { message, tone } = problemFrom(err, "Unexpected error loading jobs.");
+      setJobsStatus({ kind: "error", message, tone });
     }
   }
 
-  function setWorkerId(id: string) {
-    setWorkerIdState(id);
-    // Fire-and-forget persist; the id itself is the source of truth for the UI.
-    void persistWorkerId(id);
+  async function signIn(workerId: string, pin: string) {
+    const res = await workerLogin(workerId, pin);
+    await setToken(res.token);
+    void rememberWorkerId(res.worker.worker_id);
+    setAuth({ kind: "signedIn", worker: res.worker, mustChangePin: res.must_change_pin });
+  }
+
+  async function changePin(currentPin: string, newPin: string) {
+    await changeWorkerPin(currentPin, newPin);
+    setAuth((current) =>
+      current.kind === "signedIn" ? { ...current, mustChangePin: false } : current,
+    );
+  }
+
+  async function signOut() {
+    await workerLogout();
+    setLastCheck(null);
+    setLastImageUri(null);
+    setAuth({ kind: "signedOut" });
+  }
+
+  function expireSession() {
+    void clearToken();
+    setLastCheck(null);
+    setLastImageUri(null);
+    setAuth({ kind: "signedOut", notice: SESSION_ENDED });
+  }
+
+  function requirePinChange() {
+    setAuth((current) =>
+      current.kind === "signedIn" ? { ...current, mustChangePin: true } : current,
+    );
   }
 
   function recordCheck(result: ComplianceCheckResponse, imageUri: string) {
     setLastCheck(result);
     setLastImageUri(imageUri);
-    void addHistoryEntry(result, imageUri).then(setHistory);
+    void addHistoryEntry(result, imageUri).then(setAllHistory);
   }
+
+  const workerId = auth.kind === "signedIn" ? auth.worker.worker_id : "";
+
+  const history = useMemo(
+    () =>
+      workerId
+        ? allHistory.filter(
+            (entry) => entry.result.worker_id.toUpperCase() === workerId.toUpperCase(),
+          )
+        : [],
+    [allHistory, workerId],
+  );
 
   return (
     <SessionContext.Provider
       value={{
+        auth,
         workerId,
-        setWorkerId,
+        signIn,
+        changePin,
+        signOut,
+        expireSession,
+        requirePinChange,
         jobsStatus,
         reloadJobs,
         jobCategory,

@@ -5,7 +5,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
@@ -22,15 +21,14 @@ function titleCase(key: string): string {
 /**
  * Home / Identify screen — Phase 2.
  *
- * Worker ID (remembered across launches via AsyncStorage) + job category
- * picker populated live from GET /jobs (INSTRUCTIONS.md §2, §4 — never
- * hardcode the job list). Both live in SessionContext so Capture (Phase 3)
- * can read the selection without re-fetching or re-entering it.
+ * Who is signed in (the worker ID now comes from login, not a typed field) +
+ * job category picker populated live from GET /jobs (INSTRUCTIONS.md §2, §4 —
+ * never hardcode the job list). Both live in SessionContext so Capture
+ * can read them without re-fetching or re-entering anything.
  */
 export default function HomeScreen() {
   const {
-    workerId,
-    setWorkerId,
+    auth,
     jobsStatus,
     reloadJobs,
     jobCategory,
@@ -45,17 +43,12 @@ export default function HomeScreen() {
     >
       <Text style={styles.title}>Home / Identify</Text>
 
-      <Text style={styles.label}>Worker ID</Text>
-      <TextInput
-        style={styles.input}
-        value={workerId}
-        onChangeText={setWorkerId}
-        placeholder="W-0042"
-        placeholderTextColor="#999"
-        autoCapitalize="characters"
-        autoCorrect={false}
-        autoComplete="off"
-      />
+      {auth.kind === "signedIn" && (
+        <View style={styles.identity} testID="home-identity">
+          <Text style={styles.identityName}>{auth.worker.display_name}</Text>
+          <Text style={styles.identityId}>{auth.worker.worker_id}</Text>
+        </View>
+      )}
 
       <Text style={styles.label}>Job category</Text>
       {jobsStatus.kind === "loading" && (
@@ -66,8 +59,15 @@ export default function HomeScreen() {
       )}
       {jobsStatus.kind === "error" && (
         <View style={styles.statusRow}>
-          <Text style={[styles.statusText, styles.errorText]}>
-            Can&apos;t load jobs ✗ — {jobsStatus.message}
+          <Text
+            style={[
+              styles.statusText,
+              jobsStatus.tone === "notice" ? styles.noticeText : styles.errorText,
+            ]}
+          >
+            {jobsStatus.tone === "notice"
+              ? jobsStatus.message
+              : `Can't load jobs ✗ — ${jobsStatus.message}`}
           </Text>
           <Pressable onPress={reloadJobs}>
             <Text style={styles.retryText}>Retry</Text>
@@ -120,13 +120,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
   },
-  input: {
+  identity: {
     borderWidth: 1,
     borderColor: "#ccc",
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  identityName: {
     fontSize: 16,
+    fontWeight: "600",
+  },
+  identityId: {
+    color: "#666",
+    fontSize: 13,
   },
   statusRow: {
     flexDirection: "row",
@@ -138,6 +145,11 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: "#c0392b",
+    fontWeight: "500",
+    flexShrink: 1,
+  },
+  noticeText: {
+    color: "#8a5a0b",
     fontWeight: "500",
     flexShrink: 1,
   },

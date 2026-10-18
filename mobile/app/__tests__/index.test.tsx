@@ -1,8 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { fireEvent, render, screen } from "@testing-library/react-native";
 
 import HomeScreen from "../(tabs)/index";
 import { SessionProvider } from "../../src/context/SessionContext";
+import { SIGNED_IN } from "../../src/testing/fixtures";
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
@@ -14,7 +15,7 @@ global.fetch = mockFetch;
 
 function renderHome() {
   return render(
-    <SessionProvider>
+    <SessionProvider initialAuth={SIGNED_IN}>
       <HomeScreen />
     </SessionProvider>,
   );
@@ -84,31 +85,33 @@ describe("HomeScreen", () => {
     expect(await screen.findByText("● General Labor")).toBeTruthy();
   });
 
-  it("pre-fills a previously saved worker ID", async () => {
-    await AsyncStorage.setItem("@ppb/worker_id", "W-0042");
+  it("shows an amber 'try again shortly' notice, not a red error, when the server answers 503", async () => {
     mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => JOBS_RESPONSE,
+      ok: false,
+      status: 503,
+      json: async () => ({
+        detail: "Job requirements are temporarily unavailable. Try again shortly.",
+      }),
     });
 
     renderHome();
 
-    expect(await screen.findByDisplayValue("W-0042")).toBeTruthy();
+    const notice = await screen.findByText(/Try again shortly/);
+    expect(notice).toHaveStyle({ color: "#8a5a0b" });
+    expect(screen.queryByText(/Can't load jobs ✗/)).toBeNull();
+    expect(screen.getByText("Retry")).toBeTruthy();
   });
 
-  it("persists the worker ID as it's typed", async () => {
+  it("shows who is signed in instead of a typed worker ID field", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => JOBS_RESPONSE,
     });
 
     renderHome();
-    await waitFor(() => screen.getByText("● General Labor"));
 
-    fireEvent.changeText(screen.getByPlaceholderText("W-0042"), "W-0099");
-
-    await expect(AsyncStorage.getItem("@ppb/worker_id")).resolves.toBe(
-      "W-0099",
-    );
+    expect(await screen.findByText("Test Worker")).toBeTruthy();
+    expect(screen.getByText("W-0042")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("W-0042")).toBeNull();
   });
 });

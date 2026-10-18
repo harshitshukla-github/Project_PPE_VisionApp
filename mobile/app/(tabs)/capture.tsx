@@ -12,12 +12,13 @@ import {
 } from "react-native";
 
 import { ApiError, postComplianceCheck } from "../../src/api/client";
+import { problemFrom, type Problem } from "../../src/api/problems";
 import { useSession } from "../../src/context/SessionContext";
 
 type CaptureStatus =
   | { kind: "idle" }
   | { kind: "checking" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; problem: Problem };
 
 /**
  * Capture screen — Phase 3 (demo milestone).
@@ -29,29 +30,41 @@ type CaptureStatus =
  */
 export default function CaptureScreen() {
   const router = useRouter();
-  const { workerId, jobCategory, recordCheck } = useSession();
+  const { jobCategory, recordCheck, expireSession, requirePinChange } = useSession();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>("front");
   const [status, setStatus] = useState<CaptureStatus>({ kind: "idle" });
   const cameraRef = useRef<CameraView>(null);
 
-  const identityReady = workerId.trim().length > 0 && !!jobCategory;
+  const identityReady = !!jobCategory;
 
   async function submitPhoto(imageUri: string) {
     setStatus({ kind: "checking" });
     try {
       const result = await postComplianceCheck({
         imageUri,
-        workerId: workerId.trim(),
         jobCategory: jobCategory as string,
       });
       recordCheck(result, imageUri);
       setStatus({ kind: "idle" });
       router.push("/result");
     } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message : "Unexpected error checking compliance.";
-      setStatus({ kind: "error", message });
+      // The session itself is the problem: hand over to the root layout, which
+      // opens Login (expired) or Change PIN (still on the issued PIN).
+      if (err instanceof ApiError && err.code === "not_authenticated") {
+        setStatus({ kind: "idle" });
+        expireSession();
+        return;
+      }
+      if (err instanceof ApiError && err.code === "pin_change_required") {
+        setStatus({ kind: "idle" });
+        requirePinChange();
+        return;
+      }
+      setStatus({
+        kind: "error",
+        problem: problemFrom(err, "Unexpected error checking compliance."),
+      });
     }
   }
 
@@ -63,7 +76,10 @@ export default function CaptureScreen() {
         await submitPhoto(photo.uri);
       }
     } catch {
-      setStatus({ kind: "error", message: "Couldn't take that photo — try again." });
+      setStatus({
+        kind: "error",
+        problem: { message: "Couldn't take that photo — try again.", tone: "error" },
+      });
     }
   }
 
@@ -94,7 +110,7 @@ export default function CaptureScreen() {
       <View style={styles.center}>
         <Text style={styles.title}>Capture</Text>
         <Text style={styles.subtitle}>
-          Enter your Worker ID and pick a job category on Home first.
+          Pick a job category on Home first.
         </Text>
       </View>
     );
@@ -146,8 +162,13 @@ export default function CaptureScreen() {
         )}
 
         {status.kind === "error" && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{status.message}</Text>
+          <View
+            style={[
+              styles.errorBanner,
+              status.problem.tone === "notice" && styles.noticeBanner,
+            ]}
+          >
+            <Text style={styles.errorBannerText}>{status.problem.message}</Text>
           </View>
         )}
 
@@ -238,6 +259,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(192,57,43,0.92)",
     borderRadius: 8,
     padding: 12,
+  },
+  noticeBanner: {
+    backgroundColor: "rgba(185,119,14,0.94)",
   },
   errorBannerText: {
     color: "#fff",

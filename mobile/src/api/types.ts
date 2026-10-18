@@ -122,3 +122,25 @@ export type JobsResponse = Record<string, JobRequirements>;
 export interface ApiErrorBody {
   detail: string | { msg?: string; [key: string]: unknown }[] | unknown;
 }
+
+/** The signed-in worker, as returned by the login endpoints (docs/auth-api.md §4). */
+export interface WorkerInfo {
+  worker_id: string;
+  display_name: string;
+}
+
+/** Response body for POST /api/v1/auth/worker/login. The token is shown once. */
+export interface WorkerLoginResponse {
+  token: string;
+  token_type: "bearer";
+  expires_at: string;
+  must_change_pin: boolean;
+  worker: WorkerInfo;
+}
+
+/** Response body for GET /api/v1/auth/worker/me. */
+export interface WorkerMeResponse {
+  worker: WorkerInfo;
+  must_change_pin: boolean;
+  expires_at: string;
+}
