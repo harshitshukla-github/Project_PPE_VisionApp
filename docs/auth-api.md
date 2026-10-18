@@ -361,9 +361,9 @@ against this file.
    (`PPB_WORKER_SESSION_HOURS`). Chosen for shared site phones; a longer
    session would be more convenient on personal phones but leaves a check
    open to whoever picks the phone up next.
-2. **History on shared phones: decided in the app.** Recommendation: keep
-   history on the device, but show each worker only their own checks, and
-   never another worker's photos. Whichever is chosen, record it here.
+2. **History on shared phones: each worker sees only their own checks.**
+   Other workers' checks stay on the phone but are never shown. Decided and
+   built in the app (Priyanka, `feat/mobile-login`).
 3. **Checks on someone's behalf: not supported in Phase 2.** Every check is
    run by the worker who is signed in. Revisit if sites need supervisors to
    check workers who have no phone.
