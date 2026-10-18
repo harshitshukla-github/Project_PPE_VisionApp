@@ -1,97 +1,190 @@
 # Phase 3 — Admin API contract
 
-**Status: draft for review by Harshit and Priyanka. Nothing here is built yet.**
+**Status: draft 2, revised after Priyanka's review (2026-10-19). Nothing
+here is built yet.**
 
-This is what the admin dashboard (Phase 4) calls to run the system: the job
-PPE matrix, runtime settings, dashboard users, workers, and the audit log.
-Once agreed, the backend and the dashboard are built against it in parallel.
-Any change after that goes through a pull request that edits this file first.
+This is what the admin dashboard (Phase 4) calls to run the system: sites,
+the job PPE matrix, runtime settings, dashboard users, workers, and the
+audit log. Once agreed, the backend and the dashboard are built against it
+in parallel. Any change after that goes through a pull request that edits
+this file first.
 
 It builds on the login contract, [`docs/auth-api.md`](auth-api.md): every
 endpoint here needs a dashboard session (the `ppb_session` cookie), every
 write needs `X-CSRF-Token`, and errors use the same shape.
 
 All paths are under `/api/v1/admin`. Requests and responses are JSON.
+Timestamps are UTC with a `Z` suffix.
 
 ---
 
 ## 1. Who may do what
 
+The system has **sites** (§3). An admin works across all of them. A
+supervisor belongs to exactly one site and sees only that site's workers.
+
 | Area | admin | supervisor |
 |---|:-:|:-:|
+| See sites | all | own site |
+| Create, rename, deactivate sites | ✓ | |
 | See the job matrix, items and jobs | ✓ | ✓ |
-| Change the job matrix, add, rename, reorder or deactivate jobs | ✓ | |
+| Change the job matrix; add, rename, reorder or deactivate jobs | ✓ | |
 | See and change runtime settings | ✓ | |
 | Manage dashboard users | ✓ | |
-| See, create, rename, deactivate and reactivate workers; reset PINs | ✓ | ✓ |
+| See, create, rename, deactivate and reactivate workers; reset PINs | all sites | own site |
+| Move a worker to another site | ✓ | |
 | Read the audit log | ✓ | |
 
-Anything else returns `403 forbidden`. A user who still has to change their
-password gets `403 password_change_required` on every endpoint here.
+- Anything else returns `403 forbidden`.
+- A supervisor asking for a worker at another site gets `404 not_found`, so
+  the API doesn't reveal which worker IDs exist elsewhere.
+- A user who still has to change their password gets
+  `403 password_change_required` on every endpoint here.
+- The job matrix is shared by all sites in this phase. Per-site job lists can
+  come later if sites need them.
 
 ## 2. Conventions
 
 ### Errors
 
 The shape from `auth-api.md` §3: `detail` is a sentence for a person, `code`
-is what the dashboard branches on. Validation errors also name the `field`
-the dashboard should highlight:
+is what the dashboard branches on. Validation errors also give the `field`
+to highlight, as a path down to the exact entry:
 
 ```json
-{ "detail": "A job needs at least one required item.", "code": "no_required_item", "field": "requirements" }
+{ "detail": "\"flippers\" isn't a known item.", "code": "unknown_item", "field": "requirements[3].item" }
 ```
+
+`field` is a top-level name (`display_name`, `confidence_threshold`) or a
+path into a list (`requirements[3].item`, `keys[2]`).
+
+A request whose body is malformed (wrong types, missing fields) still gets
+FastAPI's own `422`, whose `detail` is a list of problems rather than a
+sentence. The dashboard's error handler must accept both shapes.
 
 Codes added by this contract:
 
 | HTTP | `code` | When |
 |---|---|---|
-| 404 | `not_found` | No such job, user or worker |
-| 409 | `already_exists` | The job key, email or worker ID is taken |
-| 409 | `version_conflict` | Someone else changed this job since you loaded it; reload and reapply |
+| 404 | `not_found` | No such site, job, user or worker (or one at another site, for a supervisor) |
+| 409 | `already_exists` | The site key, job key, email or worker ID is taken |
+| 409 | `version_conflict` | Someone else changed this job since you loaded it. The body carries the job as it is now in `current` |
 | 409 | `last_admin` | The change would leave no active admin |
-| 409 | `cannot_change_self` | You tried to deactivate yourself or change your own role |
+| 409 | `cannot_change_self` | You tried to deactivate yourself, or change your own role or site |
 | 409 | `last_active_job` | The change would leave the app with no jobs to choose from |
-| 422 | `invalid_key` | A job key isn't a lowercase identifier (`^[a-z][a-z0-9_]*$`, 2–64 characters) |
+| 409 | `site_in_use` | A site can't be deactivated while it has active workers or supervisors |
+| 422 | `invalid_key` | A site or job key isn't a lowercase identifier (`^[a-z][a-z0-9_]*$`, 2–64 characters) |
 | 422 | `unknown_item` | A requirement names an item that isn't in the catalogue |
-| 422 | `no_required_item` | An active job would have no required item |
-| 422 | `out_of_range` | A setting is outside its allowed range (§5) |
-| 422 | `invalid` | Anything else malformed: an item listed twice, an incomplete job order, a bad email or name |
+| 422 | `no_required_item` | A job would have no required item. This applies to every job, active or not |
+| 422 | `out_of_range` | A setting is outside its allowed range (§6) |
+| 422 | `invalid` | Anything else malformed: an item listed twice, an incomplete job order, a bad email or name, a supervisor without a site |
+
+For the mobile app, `POST /compliance/check` answers `422 unknown_job` when
+the job key doesn't exist or the job has been deactivated (INSTRUCTIONS.md).
+The app refreshes its job list and asks the worker to pick again.
 
 ### Warnings
 
 Some valid changes deserve a second look. A successful response may carry
-`warnings`: sentences the dashboard shows after saving. They never block the
-change.
+`warnings`, and they never block the change. Each warning names what it is
+about, so the dashboard can put a badge on the right cell or field:
 
 ```json
-{ "job": { "…": "…" }, "warnings": ["Face shield can only be judged by Gemini, whose accuracy on it hasn't been measured."] }
+{
+  "job": { "…": "…" },
+  "warnings": [
+    { "code": "gemini_only_item", "item": "face_shield",
+      "message": "Face shield can only be judged by Gemini, whose accuracy on it hasn't been measured." }
+  ]
+}
 ```
+
+| `code` | Extra key | Returned by |
+|---|---|---|
+| `gemini_only_item` | `item` | Job create or requirements: a required item the detector can't see |
+| `gemini_verify_off` | none | Job create or requirements, while `gemini_verify` is off: anything the detector misses stays "Needs review" |
+| `worker_auth_required` | `setting` | Settings: checks from an app without login will now be refused |
+| `gemini_verify_off` | `setting` | Settings: turning `gemini_verify` off |
+| `threshold_changed` | `setting` | Settings: every verdict from now on uses the new detector threshold |
+
+`message` is a sentence for a person; branch on `code`.
 
 ### Lists
 
-Small collections (items, jobs, users, settings) come back whole. Workers and
-the audit log are paged:
+Small collections (sites, items, jobs, users, settings) come back whole.
+Workers and the audit log are paged:
 
 ```
 GET /api/v1/admin/workers?limit=50&cursor=…
 ```
 
 ```json
-{ "items": [ … ], "next_cursor": "eyJpZCI6MTIzfQ" }
+{ "items": [ … ], "next_cursor": "eyJpZCI6MTIzfQ", "total": 312 }
 ```
 
-`limit` defaults to 50, at most 200. `next_cursor` is `null` on the last page.
-Treat it as opaque.
+- `limit` defaults to 50, at most 200.
+- `next_cursor` is `null` on the last page. Treat it as opaque.
+- `total` counts everything that matches the filters, so the page can say
+  "51–100 of 312".
 
 ### When changes take effect
 
 The server that handled the change uses it on its next request. Any other
-server process picks it up within `PPB_MATRIX_CACHE_S` (30 seconds). The
-mobile app sees new job lists the next time it calls `GET /jobs`.
+server process picks it up within `PPB_MATRIX_CACHE_S` (30 seconds); write
+responses carry `"applies_within_s": 30` so the dashboard can say so.
+
+The mobile app refetches the job list before each check, so a deactivated or
+new job shows up by the next check. A check sent against a job deactivated
+in the meantime gets `422 unknown_job` (above).
 
 ---
 
-## 3. Items (read-only)
+## 3. Sites — admin (supervisors see their own)
+
+A site is a place where workers are checked: a construction site, a plant.
+Every worker belongs to one site, and every supervisor belongs to one site.
+
+### A site
+
+```json
+{ "key": "pune_tower_b", "display_name": "Pune Tower B", "is_active": true,
+  "worker_count": 38, "created_at": "2026-10-19T09:00:00Z" }
+```
+
+`key` never changes after creation; rename with `display_name`.
+
+### `GET /sites`
+
+Every site, active or not, for an admin; only their own site for a
+supervisor.
+
+### `POST /sites` — admin
+
+```json
+{ "key": "pune_tower_b", "display_name": "Pune Tower B" }
+```
+
+`201 Created` with `{ "site": … }`. Errors: `409 already_exists`,
+`422 invalid_key`.
+
+### `PATCH /sites/{key}` — admin
+
+```json
+{ "display_name": "…", "is_active": false }
+```
+
+`200 OK` with `{ "site": … }`. Errors: `404 not_found`, `409 site_in_use`.
+A site is deactivated only once its workers and supervisors have been moved
+or deactivated; sites are never deleted, because checks will refer to them.
+
+### Existing data
+
+Migration `0003` creates a site `main` ("Main site") and puts every existing
+worker and supervisor in it.
+
+---
+
+## 4. Items (read-only)
 
 The equipment the system knows. Items come from the detector's classes, so
 the dashboard can't add or remove them.
@@ -100,17 +193,21 @@ the dashboard can't add or remove them.
 
 ```json
 [
-  { "key": "hardhat", "display_name": "Hardhat", "detectable": true, "judged_by": "detector, then Gemini" },
-  { "key": "face_shield", "display_name": "Face shield", "detectable": false, "judged_by": "Gemini only" }
+  { "key": "hardhat", "display_name": "Hardhat", "detectable": true, "detector_ap50": 0.909 },
+  { "key": "face_shield", "display_name": "Face shield", "detectable": false, "detector_ap50": null }
 ]
 ```
 
-`detectable` is whether the detector was trained on the item. A required item
-that isn't detectable is judged by Gemini alone.
+- `detectable` is whether the detector was trained on the item. A required
+  item that isn't detectable is judged by Gemini alone.
+- `detector_ap50` is the loaded model's accuracy on the item, from the
+  metrics file saved with the model's weights at training time. It is `null`
+  for items the model wasn't trained on, or when the model has no metrics
+  file. It changes when the model does, so it is never stored per item.
 
 ---
 
-## 4. Jobs and the matrix
+## 5. Jobs and the matrix
 
 ### A job
 
@@ -137,11 +234,19 @@ that isn't detectable is judged by Gemini alone.
   (listed for the worker as "verify manually", never scored). An item not in
   the list isn't asked for.
 - The list's order is the order the app shows.
+- Every job, active or not, has at least one required item.
 - `key` never changes after creation: checks and the app refer to jobs by
   key. Rename with `display_name`.
-- `version` goes up by one with every change. Edits must send the version
-  they started from; if someone else saved in between, the server answers
-  `409 version_conflict` instead of overwriting their work.
+- `version` goes up by one when the display name, the active flag or the
+  requirements change. **Reordering doesn't change it** (`PUT /job-order`).
+  Edits send the version they started from. If someone else saved in
+  between, the server answers `409 version_conflict` with the current job in
+  `current`, instead of overwriting their work:
+
+```json
+{ "detail": "Someone changed this job while you were editing it.", "code": "version_conflict",
+  "current": { "key": "welder", "version": 5, "…": "…" } }
+```
 
 ### `GET /jobs` — admin, supervisor
 
@@ -162,9 +267,10 @@ Every job, active or not, in display order.
 }
 ```
 
-`201 Created` with `{ "job": …, "warnings": […] }`. The new job goes last
-and is active. Errors: `409 already_exists`, `422 invalid_key`,
-`422 unknown_item`, `422 no_required_item`.
+`201 Created` with `{ "job": …, "warnings": […], "applies_within_s": 30 }`.
+The new job goes last and is active. Errors: `409 already_exists`,
+`422 invalid_key`, `422 unknown_item`, `422 no_required_item`,
+`422 invalid`.
 
 ### `PATCH /jobs/{key}` — admin
 
@@ -172,12 +278,13 @@ and is active. Errors: `409 already_exists`, `422 invalid_key`,
 { "version": 4, "display_name": "Welder (hot work)", "is_active": false }
 ```
 
-Either field may be left out. `200 OK` with `{ "job": … }`. Errors:
-`404 not_found`, `409 version_conflict`, `409 last_active_job`.
+Either field may be left out. `200 OK` with `{ "job": …,
+"applies_within_s": 30 }`. Errors: `404 not_found`, `409 version_conflict`,
+`409 last_active_job`.
 
-A deactivated job disappears from the app's job list and can no longer be
-checked against. Reactivating it brings it back unchanged. Jobs are never
-deleted, because past checks refer to them.
+A deactivated job disappears from the app's job list, and checks against it
+get `422 unknown_job`. Reactivating it brings it back unchanged. Jobs are
+never deleted, because checks refer to them.
 
 ### `PUT /jobs/{key}/requirements` — admin
 
@@ -194,16 +301,10 @@ row is saved as a unit.
 }
 ```
 
-`200 OK` with `{ "job": …, "warnings": […] }`. Errors: `404 not_found`,
-`409 version_conflict`, `422 unknown_item`, `422 no_required_item`, and
-`422 invalid` if an item is listed twice.
-
-Warnings returned:
-
-- a required item that isn't detectable: it is judged by Gemini alone, and
-  Gemini's accuracy on it hasn't been measured
-- required items while Gemini verification is switched off (§5): anything the
-  detector misses stays "Needs review"
+`200 OK` with `{ "job": …, "warnings": […], "applies_within_s": 30 }`.
+Errors: `404 not_found`, `409 version_conflict`, `422 unknown_item`,
+`422 no_required_item`, and `422 invalid` if an item is listed twice. Each
+error names the entry in `field`, e.g. `requirements[1].item`.
 
 ### `PUT /job-order` — admin
 
@@ -212,58 +313,73 @@ Warnings returned:
 ```
 
 Sets the display order. Every job, active or not, must appear exactly once
-(`422 invalid` otherwise). `200 OK` with the full job list. (A separate path,
-so a job keyed `order` can't collide with it.)
+(`422 invalid` otherwise). `200 OK` with the full job list. Versions don't
+change, so a matrix page that was already open keeps working without a
+reload. (A separate path, so a job keyed `order` can't collide with it.)
 
 ---
 
-## 5. Runtime settings — admin
+## 6. Runtime settings — admin
 
 The few settings worth changing without a restart. Each has a default from
-`.env`; a value saved here overrides it until it is cleared.
-
-| Name | Type | Allowed | What it does |
-|---|---|---|---|
-| `confidence_threshold` | number | 0.05–0.95 | Minimum detector confidence for a detection to count |
-| `gemini_verify` | boolean | | Whether Gemini looks at the photo when the detector can't find a required item |
-| `gemini_min_confidence` | number | 0.50–1.00 | How sure Gemini must be for its answer to change a verdict |
-| `worker_auth` | string | `optional`, `required` | Whether a check needs a worker login (`auth-api.md` §5) |
-
-API keys, the model, the database, session lengths and cookie settings stay
-in `.env` and are never shown here.
+`.env`; a value saved here overrides it until it is cleared. API keys, the
+model, the database, session lengths and cookie settings stay in `.env` and
+are never shown here.
 
 ### `GET /settings`
 
+Each setting describes itself, so the dashboard builds its form from this
+answer instead of hard-coding ranges:
+
 ```json
 [
-  { "name": "confidence_threshold", "value": 0.45, "default": 0.45, "overridden": false,
-    "updated_by": null, "updated_at": null },
-  { "name": "worker_auth", "value": "required", "default": "optional", "overridden": true,
-    "updated_by": "admin@example.com", "updated_at": "2026-10-20T08:00:00Z" }
+  { "name": "confidence_threshold", "type": "number", "min": 0.25, "max": 0.80, "step": 0.05,
+    "choices": null, "confirm": true,
+    "description": "Minimum detector confidence for a detection to count.",
+    "value": 0.45, "default": 0.45, "overridden": false, "updated_by": null, "updated_at": null },
+  { "name": "gemini_verify", "type": "boolean", "min": null, "max": null, "step": null,
+    "choices": null, "confirm": false,
+    "description": "Whether Gemini looks at the photo when the detector can't find a required item.",
+    "value": true, "default": true, "overridden": false, "updated_by": null, "updated_at": null },
+  { "name": "gemini_min_confidence", "type": "number", "min": 0.50, "max": 1.00, "step": 0.05,
+    "choices": null, "confirm": false,
+    "description": "How sure Gemini must be for its answer to change a verdict.",
+    "value": 0.75, "default": 0.75, "overridden": false, "updated_by": null, "updated_at": null },
+  { "name": "worker_auth", "type": "choice", "min": null, "max": null, "step": null,
+    "choices": ["optional", "required"], "confirm": true,
+    "description": "Whether a check needs a worker login (auth-api.md §5).",
+    "value": "optional", "default": "optional", "overridden": false,
+    "updated_by": null, "updated_at": null }
 ]
 ```
 
+- `confirm: true` means the dashboard shows the old and new value and asks
+  for confirmation before saving.
+- `confidence_threshold` is limited to 0.25–0.80. At very low thresholds
+  almost anything counts as a detection, which produces false passes, the
+  worst failure for a safety check. Tighten the range further if the
+  benchmark's F1-confidence curve says so.
+
 ### `PATCH /settings`
 
+A JSON Merge Patch (RFC 7396) of setting values:
+
 ```json
-{ "gemini_min_confidence": 0.8, "worker_auth": "required" }
+{ "gemini_min_confidence": 0.8, "worker_auth": "required", "confidence_threshold": null }
 ```
 
-Only the settings named change. `null` clears an override and returns to the
-`.env` default. `200 OK` with the full list and any `warnings`. Error:
-`422 out_of_range`, with `field` naming the setting.
+- A setting left out is unchanged.
+- A setting given a value is set to it.
+- `null` clears the override, returning the setting to its `.env` default.
 
-Warnings returned:
-
-- `worker_auth` → `required`: checks from an app without login will be
-  refused. The dashboard must ask for confirmation before sending this.
-- `gemini_verify` → `false`: anything the detector misses stays "Needs
-  review".
-- `confidence_threshold` changed: every verdict from now on is affected.
+`200 OK` with `{ "settings": [ …full list as GET… ], "warnings": [ … ],
+"applies_within_s": 30 }`. `warnings` is always present, empty when there is
+nothing to say. Error: `422 out_of_range` (or `invalid` for a value of the
+wrong type or not in `choices`), with `field` naming the setting.
 
 ---
 
-## 6. Dashboard users — admin
+## 7. Dashboard users — admin
 
 ### A user
 
@@ -273,6 +389,7 @@ Warnings returned:
   "email": "supervisor@example.com",
   "display_name": "Site Supervisor",
   "role": "supervisor",
+  "site": "pune_tower_b",
   "is_active": true,
   "must_change_password": true,
   "locked_until": null,
@@ -281,6 +398,8 @@ Warnings returned:
 }
 ```
 
+`site` is the supervisor's site key, and `null` for an admin.
+
 ### `GET /users`
 
 Every user, active or not.
@@ -288,7 +407,8 @@ Every user, active or not.
 ### `POST /users`
 
 ```json
-{ "email": "supervisor@example.com", "display_name": "Site Supervisor", "role": "supervisor" }
+{ "email": "supervisor@example.com", "display_name": "Site Supervisor", "role": "supervisor",
+  "site": "pune_tower_b" }
 ```
 
 `201 Created`:
@@ -297,21 +417,27 @@ Every user, active or not.
 { "user": { … }, "temporary_password": "glade-copper-79-rivet" }
 ```
 
-The temporary password is shown **once**, for the admin to hand over. The
-user must replace it at first login (`must_change_password: true`). Errors:
-`409 already_exists`, `422` for an invalid email or name.
+- The temporary password is shown **once**, for the admin to hand over. The
+  user must replace it at first login (`must_change_password: true`).
+- A supervisor needs an active `site`; an admin must not have one
+  (`422 invalid`).
+- Errors: `409 already_exists`, `404 not_found` for an unknown site,
+  `422 invalid` for an invalid email, name or site combination.
 
 ### `PATCH /users/{id}`
 
 ```json
-{ "display_name": "…", "role": "admin", "is_active": false }
+{ "display_name": "…", "role": "admin", "site": null, "is_active": false }
 ```
 
 Any field may be left out. `200 OK` with `{ "user": … }`.
 
+- Making someone an admin clears their site. Making someone a supervisor
+  needs a site in the same request.
 - Deactivating a user ends all their sessions at once.
-- Errors: `404 not_found`, `409 cannot_change_self` (your own role or active
-  flag), `409 last_admin` (no active admin would remain).
+- Errors: `404 not_found`, `409 cannot_change_self` (your own role, site or
+  active flag), `409 last_admin` (no active admin would remain),
+  `422 invalid`.
 
 ### `POST /users/{id}/reset-password`
 
@@ -321,7 +447,7 @@ sessions and unlocks them. Resetting your own password here is refused
 
 ---
 
-## 7. Workers — admin, supervisor
+## 8. Workers — admin, supervisor (own site)
 
 ### A worker
 
@@ -329,6 +455,7 @@ sessions and unlocks them. Resetting your own password here is refused
 {
   "worker_id": "W-0042",
   "display_name": "Asha Verma",
+  "site": "pune_tower_b",
   "is_active": true,
   "must_change_pin": false,
   "locked_until": null,
@@ -338,10 +465,17 @@ sessions and unlocks them. Resetting your own password here is refused
 }
 ```
 
-### `GET /workers?search=&active=&limit=&cursor=`
+Worker IDs are unique across all sites.
 
-Paged (§2). `search` matches the worker ID or name, ignoring case. `active`
-is `true`, `false`, or left out for both.
+### `GET /workers?search=&site=&active=&locked=&limit=&cursor=`
+
+Paged (§2), with `total`.
+
+- `search` matches the worker ID or name, ignoring case.
+- `site` filters to one site. Admins only; a supervisor always gets their
+  own site.
+- `active` is `true`, `false`, or left out for both.
+- `locked=true` lists the workers locked out right now.
 
 ### `GET /workers/{worker_id}`
 
@@ -350,7 +484,7 @@ One worker. `worker_id` matches without regard to case.
 ### `POST /workers`
 
 ```json
-{ "worker_id": "W-0043", "display_name": "Ravi Kumar" }
+{ "worker_id": "W-0043", "display_name": "Ravi Kumar", "site": "pune_tower_b" }
 ```
 
 `201 Created`:
@@ -359,19 +493,22 @@ One worker. `worker_id` matches without regard to case.
 { "worker": { … }, "one_time_pin": "482913" }
 ```
 
-Shown **once**; the worker replaces it at first login. Errors:
-`409 already_exists`, `422` for an invalid worker ID (`auth-api.md` §4) or
-name.
+- The PIN is shown **once**; the worker replaces it at first login.
+- An admin must give `site`. A supervisor's new workers go to their own
+  site; any other `site` is `403 forbidden`.
+- Errors: `409 already_exists`, `404 not_found` for an unknown site,
+  `422` for an invalid worker ID (`auth-api.md` §4) or name.
 
 ### `PATCH /workers/{worker_id}`
 
 ```json
-{ "display_name": "…", "is_active": false }
+{ "display_name": "…", "site": "pune_tower_c", "is_active": false }
 ```
 
-`200 OK` with `{ "worker": … }`. Deactivating a worker ends their sessions at
-once. Workers are never deleted here; erasing a worker's data on request
-belongs with photo storage in Phase 5.
+`200 OK` with `{ "worker": … }`. Only an admin may change `site`.
+Deactivating a worker ends their sessions at once. Workers are never
+deleted here; erasing a worker's data on request belongs with photo storage
+in Phase 5.
 
 ### `POST /workers/{worker_id}/reset-pin`
 
@@ -380,11 +517,11 @@ their sessions. This is what a supervisor does for a locked-out worker.
 
 ---
 
-## 8. Audit log — admin
+## 9. Audit log — admin
 
-Every change made through this API, and every account created or reset from
-the CLI, is recorded in the same database transaction as the change itself:
-if the change is saved, so is its record.
+Every change made through this API, and every account or site created or
+reset from the CLI, is recorded in the same database transaction as the
+change itself: if the change is saved, so is its record.
 
 ### An entry
 
@@ -395,6 +532,7 @@ if the change is saved, so is its record.
   "actor": "admin@example.com",
   "action": "job.requirements",
   "target": "job:welder",
+  "site": null,
   "before": { "requirements": [ … ] },
   "after": { "requirements": [ … ] },
   "ip": "192.168.29.20"
@@ -402,68 +540,112 @@ if the change is saved, so is its record.
 ```
 
 - `actor` is the user's email, or `cli` for a command run on the server.
-- `before` and `after` hold only what changed, and **never** a password,
+- `site` is the site the change concerns (a worker's or supervisor's), or
+  `null`.
+- `before` and `after` hold only the keys below, and **never** a password,
   PIN, hash or token.
 
-| `action` | Recorded when |
-|---|---|
-| `job.create`, `job.update`, `job.requirements`, `job.order` | §4 |
-| `settings.update` | §5 |
-| `user.create`, `user.update`, `user.reset_password` | §6, `cli.py auth create-admin` |
-| `worker.create`, `worker.update`, `worker.reset_pin` | §7, `cli.py auth create-worker`, `reset-pin` |
+| `action` | `target` | Keys in `before` / `after` |
+|---|---|---|
+| `site.create` | `site:<key>` | after: `key`, `display_name` |
+| `site.update` | `site:<key>` | `display_name`, `is_active` (only those that changed) |
+| `job.create` | `job:<key>` | after: `key`, `display_name`, `requirements` |
+| `job.update` | `job:<key>` | `display_name`, `is_active` (only those that changed) |
+| `job.requirements` | `job:<key>` | `requirements` |
+| `job.order` | `jobs` | `keys` |
+| `settings.update` | `setting:<name>` | `value` (one entry per setting changed; `null` = back to default) |
+| `user.create` | `user:<email>` | after: `email`, `display_name`, `role`, `site` |
+| `user.update` | `user:<email>` | `display_name`, `role`, `site`, `is_active` (only those that changed) |
+| `user.reset_password` | `user:<email>` | none: the entry records only that it happened |
+| `worker.create` | `worker:<id>` | after: `worker_id`, `display_name`, `site` |
+| `worker.update` | `worker:<id>` | `display_name`, `site`, `is_active` (only those that changed) |
+| `worker.reset_pin` | `worker:<id>` | none: the entry records only that it happened |
 
-### `GET /audit?action=&target=&actor=&limit=&cursor=`
+### `GET /audit?action=&target=&actor=&site=&from=&to=&limit=&cursor=`
 
-Newest first, paged (§2). The filters match exactly; leave them out for
-everything.
+Newest first, paged (§2), with `total`. `from` and `to` are timestamps
+(inclusive, exclusive). The other filters match exactly. Leave any of them
+out for everything.
 
 ---
 
-## 9. What each side builds
+## 10. Coming later: checks and their review (Phase 5)
+
+Supervisors are meant to review checks, `NEEDS_REVIEW` above all
+(AGENTS.md §15). Checks aren't stored yet, so there is nothing to review in
+this phase. Phase 5 stores every check, with the worker's photo, and gets
+its own contract:
+
+- a checks list, filtered by site, worker, job, verdict and date
+- a check's detail, with the photo and Gemini's findings
+- a review action on `NEEDS_REVIEW` checks (compliant / not compliant, with
+  a note), recorded in the audit log
+
+Until then, the supervisor's part of the dashboard is the workers page and
+the read-only matrix. Don't build a review view yet.
+
+---
+
+## 11. What each side builds
 
 ### Backend (Harshit)
 
-- Migration `0003`: a `version` column on `jobs`, and tables `app_settings`
-  (name, value, updated_by, updated_at) and `audit_log` (columns as §8)
+- Migration `0003`:
+  - a `sites` table, with `site_id` on `workers` (required) and on `users`
+    (required for supervisors, empty for admins), backfilled to a `main` site
+  - a `version` column on `jobs`
+  - tables `app_settings` (name, value, updated_by, updated_at) and
+    `audit_log` (columns as §9)
 - The endpoints above, using `require_user(...)` from Phase 2 with the roles
-  in §1
+  in §1, and site scoping for supervisors
 - Settings read through a cache like the job matrix, so the detector
   threshold, Gemini verification and worker login follow a change without a
-  restart
-- Cache invalidation after every matrix or settings write
+  restart. Cache invalidation after every matrix or settings write
+- A metrics file saved next to the weights at training time, holding AP50
+  per class, read for `GET /items`. One is written by hand for the current
+  model from its benchmark
 - Audit entries written in the same transaction as each change, plus from
-  the CLI commands
+  the CLI. CLI: `auth create-worker` gains `--site` (optional when there is
+  only one active site), and a `sites create` command
 - Tests for every rule here, against PostgreSQL. The existing "every route
-  needs a login" test covers the new routes automatically; a new test checks
-  that each one refuses a supervisor where §1 says so
+  needs a login" test covers the new routes automatically; new tests check
+  that each route refuses a supervisor where §1 says so, and never shows a
+  supervisor another site's workers
 
 ### Dashboard (Priyanka, Phase 4)
 
 | Page | Uses |
 |---|---|
-| Matrix: jobs × items grid, each cell Required / Manual / Off, saved per row | §3, §4 |
-| Jobs: add, rename, reorder, deactivate | §4 |
-| Workers: search, add (show the one-time PIN once), deactivate, reset PIN | §7 |
-| Users (admin only): add (show the temporary password once), role, deactivate, reset | §6 |
-| Settings (admin only), with a confirmation before `worker_auth: required` | §5 |
-| Audit log (admin only) | §8 |
+| Matrix: jobs × items grid, each cell Required / Manual / Off, saved per row, with each item's AP50 and warning badges | §4, §5 |
+| Jobs: add, rename, reorder, deactivate | §5 |
+| Sites (admin only): add, rename, deactivate | §3 |
+| Workers: search, filter by site and "locked", add (show the one-time PIN once), deactivate, reset PIN | §8 |
+| Users (admin only): add (show the temporary password once), role, site, deactivate, reset | §7 |
+| Settings (admin only), generated from `GET /settings`, confirming where `confirm` is true | §6 |
+| Audit log (admin only), with date range | §9 |
 
 - Hide what the signed-in role can't use, but treat `403 forbidden` as the
   real rule.
-- On `409 version_conflict`, reload the job and show what changed.
+- On `409 version_conflict`, show the job from `current` and what changed;
+  no second request is needed.
 
-## 10. Open questions for review
+## 12. Decisions on the review questions
 
-1. **Supervisors and the matrix.** Read-only as written. Should supervisors
-   be able to change it for their own site?
-2. **Bulk worker import.** Onboarding a site one worker at a time is slow.
-   Add a CSV import (worker ID, name → one-time PINs) in this phase, or later?
-3. **Seeing and ending sessions.** As written, sessions end only through
-   deactivation or a reset. Do admins need a list of active sessions with a
-   "sign out" button?
-4. **Which settings belong in the dashboard.** Is the detector threshold too
-   risky to expose? It changes every verdict, and the audit log is the only
-   trace.
-5. **Accuracy per item.** The matrix page would be clearer with each item's
-   detector accuracy (AP50) next to it. Store those figures in the database
-   when a model is trained, or leave them to the dashboard?
+Answered in Priyanka's review of the first draft (PR #10), and adopted:
+
+1. **Supervisors and the matrix: read-only.** The matrix decides every
+   worker's verdict. Per-site job lists are a later option now that sites
+   exist (§1).
+2. **Bulk worker import: later, as a CLI command first.** A page showing a
+   hundred one-time PINs at once defeats "shown once".
+   `cli.py auth import-workers <file.csv>`, printing a sheet to hand out,
+   comes when a site needs it.
+3. **List of active sessions: not now.** Deactivation and resets already end
+   every session, which covers a lost phone or laptop.
+4. **Detector threshold: in the dashboard, admins only,** with a narrower
+   range (0.25–0.80) and a confirmation showing the old and new value. Every
+   change is audited, where editing `.env` left no trace.
+5. **Accuracy per item: per model, not per item.** `GET /items` returns
+   `detector_ap50` from the loaded model's metrics file (§4).
+6. **Sites: in scope now** (decided by Harshit), so `site_id` is added to
+   workers and users in this phase rather than retrofitted later.
