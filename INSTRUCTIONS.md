@@ -162,10 +162,13 @@ Semantics the UI must respect:
   the explanation, or both. Response time ranges from under 1 s (detector
   alone) to roughly 10 s (second opinion plus explanation).
 - `bbox` = `[x1, y1, x2, y2]` in pixels of the uploaded image.
-- Errors: `400` bad image, `422` invalid `job_category` (body's `detail`
-  lists valid ones), `503` job requirements temporarily unavailable (the
-  server's database is down and it has no copy yet; show "try again
-  shortly", not a verdict), network failure = server unreachable (see §5).
+- Errors: `400` bad image, `422` with `code: "unknown_job"` when the
+  `job_category` doesn't exist or an admin has deactivated it since the app
+  loaded its list (refresh `GET /jobs` and ask the worker to pick again; the
+  `detail` sentence lists the active jobs), `503` job requirements
+  temporarily unavailable (the server's database is down and it has no copy
+  yet; show "try again shortly", not a verdict), network failure = server
+  unreachable (see §5).
 
 ### GET /jobs
 Returns a **flat map** — job key → requirements (no wrapper object, no

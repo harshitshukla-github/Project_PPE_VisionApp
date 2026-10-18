@@ -21,9 +21,10 @@ from sqlalchemy.exc import OperationalError
 
 from src.api.auth_routes import router as auth_router
 from src.api.deps import init_detector
+from src.api.errors import ApiError, api_error_handler
 from src.api.middleware import add_middleware
 from src.api.routes import router
-from src.auth.errors import AuthError, auth_error_handler, database_unavailable_handler
+from src.auth.errors import database_unavailable_handler
 from src.inference.compliance import MatrixUnavailableError, load_job_matrix, matrix_source
 from src.settings import settings
 
@@ -73,5 +74,5 @@ app = FastAPI(
 add_middleware(app)
 app.include_router(router)
 app.include_router(auth_router)
-app.add_exception_handler(AuthError, auth_error_handler)
+app.add_exception_handler(ApiError, api_error_handler)  # AuthError included
 app.add_exception_handler(OperationalError, database_unavailable_handler)

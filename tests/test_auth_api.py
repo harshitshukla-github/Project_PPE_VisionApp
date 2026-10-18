@@ -137,6 +137,17 @@ class TestWorkerLogin:
         assert body["must_change_pin"] is True
         assert body["worker"] == {"worker_id": ISSUED, "display_name": "Asha Verma"}
 
+    def test_timestamps_are_utc_with_z(self, client: TestClient, issued_pin: str,
+                                       admin: User) -> None:
+        """docs/auth-api.md §3: UTC with a Z, whatever PostgreSQL's time zone."""
+        login = _worker_login(client, ISSUED, issued_pin).json()
+        me = client.get("/api/v1/auth/worker/me", headers=_bearer(login["token"])).json()
+        dashboard = _user_login(client, ADMIN_EMAIL, ADMIN_PASSWORD).json()
+        dashboard_me = client.get("/api/v1/auth/me").json()
+        for stamp in (login["expires_at"], me["expires_at"], dashboard["expires_at"],
+                      dashboard_me["expires_at"]):
+            assert stamp.endswith("Z"), stamp
+
     def test_session_lasts_one_shift(self, client: TestClient, issued_pin: str,
                                      db: Session) -> None:
         _worker_login(client, ISSUED, issued_pin)

@@ -11,9 +11,14 @@ import math
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from src.api.errors import ApiError
 
-class AuthError(Exception):
-    """An error a login endpoint, or a check of who is signed in, returns."""
+
+class AuthError(ApiError):
+    """An error a login endpoint, or a check of who is signed in, returns.
+
+    Adds ``WWW-Authenticate: Bearer`` to a 401 answering a bearer-token request.
+    """
 
     def __init__(
         self,
@@ -23,22 +28,14 @@ class AuthError(Exception):
         retry_after_s: float | None = None,
         bearer: bool = False,
     ) -> None:
-        super().__init__(detail)
-        self.status = status
-        self.code = code
-        self.detail = detail
-        self.retry_after_s = None if retry_after_s is None else max(1, math.ceil(retry_after_s))
+        super().__init__(status, code, detail, retry_after_s=retry_after_s)
         self.bearer = bearer
 
-    def to_response(self) -> JSONResponse:
-        body: dict = {"detail": self.detail, "code": self.code}
-        headers: dict[str, str] = {}
-        if self.retry_after_s is not None:
-            body["retry_after_s"] = self.retry_after_s
-            headers["Retry-After"] = str(self.retry_after_s)
+    def headers(self) -> dict[str, str]:
+        headers = super().headers()
         if self.status == 401 and self.bearer:
             headers["WWW-Authenticate"] = "Bearer"
-        return JSONResponse(body, status_code=self.status, headers=headers)
+        return headers
 
 
 async def auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:

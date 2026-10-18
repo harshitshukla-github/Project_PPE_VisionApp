@@ -9,6 +9,7 @@ import json
 
 import pytest
 
+from src.api.errors import ApiError
 from src.auth.crypto import (
     generate_pin,
     hash_secret,
@@ -158,6 +159,15 @@ class TestFailureLimiter:
 
 
 class TestErrors:
+    def test_field_is_included_only_when_set(self) -> None:
+        with_field = json.loads(ApiError(422, "unknown_job", "x", field="job_category")
+                                .to_response().body)
+        assert with_field == {"detail": "x", "code": "unknown_job", "field": "job_category"}
+        assert "field" not in json.loads(ApiError(404, "not_found", "x").to_response().body)
+
+    def test_auth_errors_are_api_errors(self) -> None:
+        assert isinstance(AuthError(401, "not_authenticated", "x"), ApiError)
+
     def test_body_keeps_detail_a_string_and_adds_code(self) -> None:
         response = AuthError(423, "account_locked", "Locked.", retry_after_s=839.2).to_response()
         body = json.loads(response.body)
