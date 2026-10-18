@@ -151,7 +151,10 @@ class TestComplianceCheck:
     def test_unknown_job_is_422_with_choices(self, api_client, sample_image_bytes) -> None:
         response = self._check(api_client, sample_image_bytes, job="astronaut")
         assert response.status_code == 422
-        assert "general_labor" in response.json()["detail"]
+        body = response.json()
+        assert body["code"] == "unknown_job"
+        assert body["field"] == "job_category"
+        assert "general_labor" in body["detail"]
 
     def test_response_echoes_worker_and_job(
         self, api_client, fake_detector, sample_image_bytes

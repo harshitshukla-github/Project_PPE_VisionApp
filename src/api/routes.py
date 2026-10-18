@@ -13,6 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 
 from src.api.deps import get_detector
+from src.api.errors import ApiError
 from src.auth.deps import SignedInWorker, worker_for_check, worker_or_user_when_required
 from src.inference.compliance import (
     JobRequirements,
@@ -215,9 +216,13 @@ async def compliance_check(
 
     matrix = _job_matrix_or_503()
     if job_category not in matrix:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown job_category '{job_category}'. Known: {sorted(matrix)}",
+        # Missing, or deactivated by an admin since the app loaded its list.
+        raise ApiError(
+            422,
+            "unknown_job",
+            f"'{job_category}' isn't an active job. Refresh the job list and pick "
+            f"again. Active jobs: {', '.join(matrix)}.",
+            field="job_category",
         )
 
     array = await _decode_upload(image)

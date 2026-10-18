@@ -146,6 +146,29 @@ class TestEndToEnd:
         """GET /jobs from the database returns byte-for-byte what YAML did."""
         assert api_client.get("/api/v1/jobs").json() == _yaml_matrix()
 
+    def test_check_against_a_deactivated_job_is_unknown_job(
+        self, api_client, use_test_db: Engine, sample_image_bytes: bytes
+    ) -> None:
+        """An admin deactivated the job after the app loaded its list."""
+        with Session(use_test_db) as session, session.begin():
+            session.execute(update(Job).where(Job.key == "welder").values(is_active=False))
+        invalidate_job_matrix_cache()
+        response = api_client.post(
+            "/api/v1/compliance/check",
+            files={"image": ("worker.png", sample_image_bytes, "image/png")},
+            data={"worker_id": "W-0042", "job_category": "welder"},
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == "unknown_job"
+        assert "welder" not in response.json()["detail"].split("Active jobs:")[1]
+
+    def test_connections_use_utc(self, use_test_db: Engine) -> None:
+        """Whatever the server's own time zone, timestamps come back in UTC."""
+        with use_test_db.connect() as conn:
+            assert conn.execute(text("SHOW timezone")).scalar() == "UTC"
+            now = conn.execute(text("SELECT now()")).scalar()
+        assert now.utcoffset().total_seconds() == 0
+
     def test_an_edit_in_the_database_changes_verdicts(self, use_test_db: Engine) -> None:
         dets = [make_detection("hardhat"), make_detection("safety_vest")]
         assert check_compliance(dets, "general_labor").verdict.value == "NEEDS_REVIEW"

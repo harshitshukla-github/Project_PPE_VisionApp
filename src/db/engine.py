@@ -56,5 +56,7 @@ def get_engine(url: str | None = None) -> Engine:
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=5,
-        connect_args={"connect_timeout": 5},
+        # UTC on every connection: PostgreSQL returns timestamps in the
+        # connection's time zone, and the contracts promise UTC with a "Z".
+        connect_args={"connect_timeout": 5, "options": "-c timezone=UTC"},
     )
