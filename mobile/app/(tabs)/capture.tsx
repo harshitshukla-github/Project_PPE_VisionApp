@@ -30,7 +30,8 @@ type CaptureStatus =
  */
 export default function CaptureScreen() {
   const router = useRouter();
-  const { jobCategory, recordCheck, expireSession, requirePinChange } = useSession();
+  const { jobCategory, jobNotice, refreshJobs, recordCheck, expireSession, requirePinChange } =
+    useSession();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>("front");
   const [status, setStatus] = useState<CaptureStatus>({ kind: "idle" });
@@ -41,6 +42,16 @@ export default function CaptureScreen() {
   async function submitPhoto(imageUri: string) {
     setStatus({ kind: "checking" });
     try {
+      // An admin may have deactivated this job since the list was loaded
+      // (docs/admin-api.md §2). Look again before sending the photo; if the
+      // job has gone, refreshJobs clears the selection and Capture asks the
+      // worker to pick again. If the server can't be asked (null), go on and
+      // let the check itself report the problem.
+      const jobs = await refreshJobs();
+      if (jobs && !jobs[jobCategory as string]) {
+        setStatus({ kind: "idle" });
+        return;
+      }
       const result = await postComplianceCheck({
         imageUri,
         jobCategory: jobCategory as string,
@@ -59,6 +70,25 @@ export default function CaptureScreen() {
       if (err instanceof ApiError && err.code === "pin_change_required") {
         setStatus({ kind: "idle" });
         requirePinChange();
+        return;
+      }
+      // The job went between our look and the check. Look again: if it's gone,
+      // the selection is cleared with a note; if the list still has it (another
+      // server process hasn't caught up yet), ask the worker to try again.
+      if (err instanceof ApiError && err.code === "unknown_job") {
+        const jobs = await refreshJobs();
+        const gone = jobs !== null && !jobs[jobCategory as string];
+        setStatus(
+          gone
+            ? { kind: "idle" }
+            : {
+                kind: "error",
+                problem: {
+                  message: "That job isn't available right now. Try again shortly, or pick your job again on Home.",
+                  tone: "notice",
+                },
+              },
+        );
         return;
       }
       setStatus({
@@ -109,8 +139,8 @@ export default function CaptureScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.title}>Capture</Text>
-        <Text style={styles.subtitle}>
-          Pick a job category on Home first.
+        <Text style={[styles.subtitle, jobNotice && styles.noticeText]}>
+          {jobNotice ? `${jobNotice.message} Go to Home.` : "Pick a job category on Home first."}
         </Text>
       </View>
     );
@@ -211,6 +241,10 @@ const styles = StyleSheet.create({
   subtitle: {
     color: "#666",
     textAlign: "center",
+  },
+  noticeText: {
+    color: "#8a5a0b",
+    fontWeight: "500",
   },
   camera: {
     ...StyleSheet.absoluteFill,

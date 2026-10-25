@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -21,6 +22,7 @@ import {
 } from "../api/client";
 import { problemFrom, type Problem } from "../api/problems";
 import type { ComplianceCheckResponse, JobsResponse, WorkerInfo } from "../api/types";
+import { titleCase } from "../format";
 import { addHistoryEntry, getHistory, type HistoryEntry } from "../storage/history";
 
 export type JobsStatus =
@@ -56,9 +58,20 @@ interface SessionState {
   /** GET /jobs result, shared so Capture doesn't need to re-fetch. */
   jobsStatus: JobsStatus;
   reloadJobs: () => void;
+  /**
+   * Re-reads GET /jobs without flicker and returns the list, or null if the
+   * server couldn't answer. Admins can deactivate jobs while the app is open
+   * (docs/admin-api.md §2), so this runs before every check. If the selected
+   * job has gone, the selection is cleared and `jobNotice` says so: it is
+   * never swapped for another job, because a check against the wrong job
+   * would give a wrong verdict.
+   */
+  refreshJobs: () => Promise<JobsResponse | null>;
   /** Selected job_category key (a key of jobsStatus.jobs when loaded). */
   jobCategory: string | null;
   setJobCategory: (key: string) => void;
+  /** Why the selection was cleared ("Welder isn't available any more…"); gone once a job is picked. */
+  jobNotice: Problem | null;
 
   /** Most recent POST /compliance/check result, consumed by the Result screen. */
   lastCheck: ComplianceCheckResponse | null;
@@ -99,6 +112,10 @@ export function SessionProvider({
   const [auth, setAuth] = useState<AuthState>(initialAuth ?? { kind: "loading" });
   const [jobsStatus, setJobsStatus] = useState<JobsStatus>({ kind: "loading" });
   const [jobCategory, setJobCategory] = useState<string | null>(null);
+  const [jobNotice, setJobNotice] = useState<Problem | null>(null);
+  // The latest selection, readable from async code that started before it changed.
+  const jobCategoryRef = useRef<string | null>(null);
+  jobCategoryRef.current = jobCategory;
   const [lastCheck, setLastCheck] = useState<ComplianceCheckResponse | null>(null);
   const [lastImageUri, setLastImageUri] = useState<string | null>(null);
   const [allHistory, setAllHistory] = useState<HistoryEntry[]>([]);
@@ -150,6 +167,31 @@ export function SessionProvider({
       const { message, tone } = problemFrom(err, "Unexpected error loading jobs.");
       setJobsStatus({ kind: "error", message, tone });
     }
+  }
+
+  async function refreshJobs(): Promise<JobsResponse | null> {
+    let jobs: JobsResponse;
+    try {
+      jobs = await getJobs();
+    } catch {
+      // Offline or the server is busy: the check itself will say so.
+      return null;
+    }
+    setJobsStatus({ kind: "loaded", jobs });
+    const selected = jobCategoryRef.current;
+    if (selected && !jobs[selected]) {
+      setJobCategory(null);
+      setJobNotice({
+        message: `${titleCase(selected)} isn't available any more. Pick your job again.`,
+        tone: "notice",
+      });
+    }
+    return jobs;
+  }
+
+  function selectJob(key: string) {
+    setJobCategory(key);
+    setJobNotice(null);
   }
 
   async function signIn(workerId: string, pin: string) {
@@ -216,8 +258,10 @@ export function SessionProvider({
         requirePinChange,
         jobsStatus,
         reloadJobs,
+        refreshJobs,
         jobCategory,
-        setJobCategory,
+        setJobCategory: selectJob,
+        jobNotice,
         lastCheck,
         lastImageUri,
         recordCheck,

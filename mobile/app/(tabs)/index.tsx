@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 
+import { ProblemBanner } from "../../src/components/ProblemBanner";
 import { useSession } from "../../src/context/SessionContext";
 
 /** "general_labor" -> "General Labor" — INSTRUCTIONS.md §4: title-case the object key for the label. */
@@ -33,6 +34,7 @@ export default function HomeScreen() {
     reloadJobs,
     jobCategory,
     setJobCategory,
+    jobNotice,
   } = useSession();
 
   return (
@@ -49,6 +51,8 @@ export default function HomeScreen() {
           <Text style={styles.identityId}>{auth.worker.worker_id}</Text>
         </View>
       )}
+
+      {jobNotice && <ProblemBanner problem={jobNotice} />}
 
       <Text style={styles.label}>Job category</Text>
       {jobsStatus.kind === "loading" && (

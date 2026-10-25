@@ -38,7 +38,11 @@ A simple, robust compliance-check app for workers. Four screens:
    dropdown **populated from `GET /api/v1/jobs`** (never hardcode the job
    list).
 2. **Capture** — camera preview → take photo (or pick from gallery for
-   testing). Front camera default, full-body framing hint overlay.
+   testing). Front camera default, full-body framing hint overlay. Before
+   every check the app re-reads `GET /jobs`: if an admin has deactivated the
+   worker's job, the photo is not sent and the worker is asked to pick again
+   (never switched to another job). `422 unknown_job` from the check does the
+   same.
 3. **Result** — three verdicts, three distinct treatments:
    - **PASS**: big green check, detected items list with confidence.
    - **FAIL**: big red cross, the `explanation` text prominently, list of
