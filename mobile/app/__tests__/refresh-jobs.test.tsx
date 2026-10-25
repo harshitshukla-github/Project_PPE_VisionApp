@@ -28,12 +28,19 @@ const WITHOUT_WELDER = { general_labor: ALL_JOBS.general_labor };
 let jobsAnswer: () => ReturnType<typeof ok>;
 let lastRefresh: unknown;
 
-/** A button standing in for "Capture is about to send a check". */
+/** A button standing in for "Capture is about to send a check", plus the ways a worker's turn ends. */
 function RefreshButton() {
-  const { refreshJobs, jobCategory } = useSession();
+  const { refreshJobs, jobCategory, jobNotice, signOut, expireSession } = useSession();
   return (
     <>
       <Text testID="selected">{jobCategory ?? "none"}</Text>
+      <Text testID="job-notice">{jobNotice?.message ?? "no notice"}</Text>
+      <Pressable testID="sign-out" onPress={() => void signOut()}>
+        <Text>sign out</Text>
+      </Pressable>
+      <Pressable testID="expire" onPress={expireSession}>
+        <Text>expire</Text>
+      </Pressable>
       <Pressable
         testID="refresh"
         onPress={async () => {
@@ -102,7 +109,9 @@ describe("refreshJobs", () => {
     await refresh();
 
     expect(screen.getByTestId("selected")).toHaveTextContent("none");
-    expect(await screen.findByText("Welder isn't available any more. Pick your job again.")).toBeTruthy();
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent(
+      "Welder isn't available any more. Pick your job again.",
+    );
     // General Labor is listed but is NOT selected for them.
     expect(screen.getByText("○ General Labor")).toBeTruthy();
     expect(screen.queryByText("● General Labor")).toBeNull();
@@ -121,6 +130,23 @@ describe("refreshJobs", () => {
 
     await waitFor(() => expect(screen.queryByTestId("problem-notice")).toBeNull());
     expect(screen.getByTestId("selected")).toHaveTextContent("general_labor");
+  });
+
+  it.each([
+    ["signing out", "sign-out"],
+    ["an ended session", "expire"],
+  ])("%s clears the note, so the next worker on a shared phone doesn't see it", async (_label, button) => {
+    renderHome();
+    fireEvent.press(await screen.findByText("○ Welder"));
+    jobsAnswer = () => ok(WITHOUT_WELDER);
+    await refresh();
+    expect(screen.getByTestId("job-notice")).toHaveTextContent(/Welder isn't available any more/);
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId(button));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("job-notice")).toHaveTextContent("no notice"));
   });
 
   it("returns null and changes nothing when the server can't be reached", async () => {
