@@ -174,9 +174,32 @@ Setting `PPB_WORKER_AUTH`:
 | `required` | `401 not_authenticated` | `worker_id` from the token |
 
 Order of release:
-1. The backend ships with `optional`. The current app keeps working.
-2. The app ships its login screen.
-3. The server is switched to `required`.
+1. The backend ships with `optional`. The current app keeps working. ✅
+2. The app ships its login screen. ✅ (PR #11)
+3. The server is switched to `required`, when the conditions below are met.
+
+### When to switch to `required`
+
+Switching too early locks out every phone still running an app without
+login. Switching late leaves checks that aren't tied to a signed-in worker.
+So the switch happens when **both** of these are true:
+
+1. **Every phone in use runs the login build** (the app from PR #11 or
+   later). The supervisor of each site confirms it for their site.
+2. **The server has seen no check without a login for 3 working days in a
+   row.** The backend logs every such check as `[<worker_id>, not signed
+   in]`, so the log shows whether any old app is still in use. Once checks
+   are stored (Phase 5), the dashboard can show this count instead.
+
+Then:
+
+- **Who:** Harshit (an admin).
+- **How:** `PPB_WORKER_AUTH=required` in `.env` and a restart, or the
+  `worker_auth` setting in the dashboard once Phase 3 is built (which also
+  records it in the audit log).
+- **Undo:** set it back to `optional`. Phones with the login build keep
+  working either way.
+- **Record it:** add the date of the switch to this section.
 
 ### Other endpoints
 
