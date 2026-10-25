@@ -8,6 +8,7 @@ export const ADMIN_SESSION: SessionResponse = {
     email: "admin@example.com",
     display_name: "Test Admin",
     role: "admin",
+    site: null,
     must_change_password: false,
   },
   csrf_token: "csrf-1",
