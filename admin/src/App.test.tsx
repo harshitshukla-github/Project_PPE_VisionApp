@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import { resetClientState } from "./api/client";
+import { resetClientState, setAdminTransport } from "./api/client";
 import { AuthProvider } from "./auth/AuthContext";
 import {
   ADMIN_SESSION,
@@ -14,6 +14,7 @@ import {
   noContent,
   ok,
 } from "./testing/mockApi";
+import { startMockBackend } from "./testing/harness";
 
 const NOT_SIGNED_IN = () => fail(401, { detail: "Sign in.", code: "not_authenticated" });
 
@@ -33,8 +34,16 @@ async function signInWith(email: string, password: string) {
   return user;
 }
 
-beforeEach(() => resetClientState());
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  resetClientState();
+  // The pages behind sign-in ask for lists; these tests are about signing in, so give them empty ones.
+  setAdminTransport(async () => ok([]));
+  window.location.hash = "";
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.location.hash = "";
+});
 
 describe("on page load (GET /auth/me)", () => {
   it("shows a spinner, then the login page when nobody is signed in", async () => {
@@ -279,5 +288,92 @@ describe("signing out", () => {
     await user.click(button);
 
     await waitFor(() => expect(screen.getByLabelText("Email")).toBeInTheDocument());
+  });
+});
+
+describe("the signed-in dashboard", () => {
+  const SUPERVISOR_SESSION = {
+    ...ADMIN_SESSION,
+    user: {
+      ...ADMIN_SESSION.user, id: 101, email: "supervisor.b@example.com", display_name: "Site Supervisor B",
+      role: "supervisor" as const, site: "pune_tower_b",
+    },
+  };
+
+  /** Signed in as `session`'s user, with the mock admin backend serving that same user. */
+  function openAs(session: typeof ADMIN_SESSION, hash = "") {
+    const backend = startMockBackend(session.user);
+    mockApi({ "GET /api/v1/auth/me": () => ok(session) });
+    window.location.hash = hash;
+    renderApp();
+    return backend;
+  }
+
+  it("gives an admin every page in the navigation", async () => {
+    openAs(ADMIN_SESSION);
+
+    const nav = await screen.findByRole("navigation", { name: "Pages" });
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "Matrix", "Jobs", "Workers", "Sites", "Users", "Settings", "Audit log",
+    ]);
+  });
+
+  it("gives a supervisor only the matrix and the workers", async () => {
+    openAs(SUPERVISOR_SESSION);
+
+    const nav = await screen.findByRole("navigation", { name: "Pages" });
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["Matrix", "Workers"]);
+    expect(screen.getByTestId("whoami")).toHaveTextContent("Site Supervisor B · supervisor");
+  });
+
+  it("opens the matrix by default, and marks the current page", async () => {
+    openAs(ADMIN_SESSION);
+
+    expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Matrix" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Workers" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("follows the link to another page", async () => {
+    openAs(ADMIN_SESSION);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("link", { name: "Workers" }));
+
+    expect(await screen.findByRole("heading", { name: "Workers" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workers" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("opens a page straight from its address", async () => {
+    openAs(ADMIN_SESSION, "#/audit");
+
+    expect(await screen.findByRole("heading", { name: "Audit log" })).toBeInTheDocument();
+  });
+
+  it("says so for an address that isn't a page", async () => {
+    openAs(ADMIN_SESSION, "#/nowhere");
+
+    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeInTheDocument();
+  });
+
+  it("tells a supervisor an admin page isn't for them, without asking the server for it", async () => {
+    const backend = startMockBackend(SUPERVISOR_SESSION.user);
+    const asked = vi.fn(backend.fetch); // every call the dashboard makes to /admin/*
+    setAdminTransport(asked);
+    mockApi({ "GET /api/v1/auth/me": () => ok(SUPERVISOR_SESSION) });
+    window.location.hash = "#/users";
+    renderApp();
+
+    expect(await screen.findByRole("heading", { name: "You don't have access to this page" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Users" })).toBeNull();
+    // The Users page was never opened, so nothing was asked of the server. (Its `403 forbidden`
+    // is still the real rule, covered by the mock backend's own tests.)
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("says plainly that the admin data is sample data while the API is faked", async () => {
+    openAs(ADMIN_SESSION);
+
+    expect(await screen.findByTestId("mock-banner")).toHaveTextContent("Sample data");
   });
 });
