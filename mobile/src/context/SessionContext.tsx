@@ -212,6 +212,8 @@ export function SessionProvider({
     await workerLogout();
     setLastCheck(null);
     setLastImageUri(null);
+    // One worker's "that job isn't available" note isn't the next worker's.
+    setJobNotice(null);
     setAuth({ kind: "signedOut" });
   }
 
@@ -219,6 +221,7 @@ export function SessionProvider({
     void clearToken();
     setLastCheck(null);
     setLastImageUri(null);
+    setJobNotice(null);
     setAuth({ kind: "signedOut", notice: SESSION_ENDED });
   }
 
