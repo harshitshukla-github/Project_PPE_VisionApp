@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from src.admin import runtime
 from src.auth.crypto import tokens_match
 from src.auth.errors import AuthError, not_authenticated
 from src.auth.service import resolve_user_session, resolve_worker_session
@@ -111,7 +112,7 @@ def worker_for_check(request: Request) -> SignedInWorker | None:
     """
     token = bearer_token(request)
     if token is None:
-        if settings.ppb_worker_auth == "required":
+        if runtime.get("worker_auth") == "required":
             raise not_authenticated(bearer=True)
         return None
     with open_db() as db:
@@ -167,7 +168,7 @@ def require_user(
 def worker_or_user_when_required(request: Request) -> None:
     """For endpoints any signed-in person may use once login is required
     (``POST /detect``). With ``PPB_WORKER_AUTH=optional`` anyone may."""
-    if settings.ppb_worker_auth != "required":
+    if runtime.get("worker_auth") != "required":
         return
     if bearer_token(request) is not None:
         worker_for_check(request)

@@ -279,7 +279,7 @@ def apply_verification(
         result: Detector-only compliance result.
         verification: Gemini's findings, or None if the check did not run.
         min_confidence: Findings below this are treated as uncertain.
-            Defaults to ``settings.ppb_gemini_verify_min_confidence``.
+            Defaults to the live ``gemini_min_confidence`` setting.
 
     Returns:
         The resolved result (a copy), or ``result`` itself if nothing applies.
@@ -287,10 +287,11 @@ def apply_verification(
     if verification is None or result.verdict is not Verdict.NEEDS_REVIEW:
         return result
 
-    threshold = (
-        settings.ppb_gemini_verify_min_confidence
-        if min_confidence is None else min_confidence
-    )
+    if min_confidence is None:
+        from src.admin import runtime  # noqa: PLC0415 — avoids a circular import
+
+        min_confidence = float(runtime.get("gemini_min_confidence"))
+    threshold = min_confidence
     findings = {f.item: f for f in verification.items}
 
     not_worn: list[str] = []

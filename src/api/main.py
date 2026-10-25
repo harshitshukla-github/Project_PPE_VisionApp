@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from loguru import logger
 from sqlalchemy.exc import OperationalError
 
+from src.api.admin_routes import router as admin_router
 from src.api.auth_routes import router as auth_router
 from src.api.deps import init_detector
 from src.api.errors import ApiError, api_error_handler
@@ -74,5 +75,6 @@ app = FastAPI(
 add_middleware(app)
 app.include_router(router)
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.add_exception_handler(ApiError, api_error_handler)  # AuthError included
 app.add_exception_handler(OperationalError, database_unavailable_handler)

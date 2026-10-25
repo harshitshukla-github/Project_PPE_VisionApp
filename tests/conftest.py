@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from sqlalchemy import text
 
+from src.admin import runtime
 from src.db.engine import get_engine
 from src.db.matrix import seed_from_yaml
 from src.db.migrate import upgrade_to_head
@@ -35,10 +36,12 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(autouse=True)
 def _fresh_job_matrix_cache() -> Iterator[None]:
-    """No test sees a database matrix cached by an earlier one."""
+    """No test sees a database matrix, or saved settings, cached by an earlier one."""
     invalidate_job_matrix_cache()
+    runtime.invalidate()
     yield
     invalidate_job_matrix_cache()
+    runtime.invalidate()
 
 
 # ---------------------------------------------------------------------------

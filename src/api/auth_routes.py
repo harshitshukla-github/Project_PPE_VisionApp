@@ -77,6 +77,8 @@ class UserInfo(BaseModel):
     email: str
     display_name: str
     role: str
+    # The supervisor's site key; null for an admin (docs/auth-api.md §6).
+    site: str | None
     must_change_password: bool
 
 
@@ -102,6 +104,7 @@ def _user_session(user: User, record: AuthSession) -> UserSessionResponse:
             email=user.email,
             display_name=user.display_name,
             role=user.role,
+            site=user.site.key if user.site else None,
             must_change_password=user.must_change_password,
         ),
         csrf_token=record.csrf_token or "",
