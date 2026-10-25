@@ -289,7 +289,33 @@ def train(
         run_dir = Path(results.save_dir)
 
     best_pt = _save_best_weights(run_dir, model_name, run_name=run_name)
+    if best_pt is not None:
+        _save_metrics(best_pt, model_name, results, run_dir)
     return best_pt
+
+
+def _save_metrics(best_pt: Path, model_name: str, results: object, run_dir: Path) -> None:
+    """Save per-class AP50 next to the weights, for the dashboard (docs/admin-api.md §4).
+
+    Uses the final validation that ultralytics runs on best.pt. If it isn't
+    available, a metrics file left from the model this one replaced is
+    removed, so it can't be read as this model's accuracy.
+    """
+    from src.admin.metrics import metrics_path, write_metrics  # noqa: PLC0415
+
+    try:
+        names = results.names  # type: ignore[attr-defined]
+        ap50 = {names[int(i)]: float(v)
+                for i, v in zip(results.box.ap_class_index, results.box.ap50)}  # type: ignore[attr-defined]
+    except (AttributeError, KeyError, TypeError):
+        ap50 = {}
+    if ap50:
+        path = write_metrics(best_pt, model_name, ap50,
+                             source=f"validation split, end of training ({run_dir.name})")
+        logger.info(f"Per-class AP50 saved → {path}")
+    else:
+        metrics_path(best_pt).unlink(missing_ok=True)
+        logger.warning("No per-class AP50 from this run; the dashboard will show none.")
 
 
 # ---------------------------------------------------------------------------

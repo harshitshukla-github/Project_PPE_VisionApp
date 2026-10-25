@@ -25,7 +25,7 @@ from src.auth.crypto import token_hash
 from src.auth.deps import require_user
 from src.auth.errors import AuthError, auth_error_handler
 from src.auth.ratelimit import ip_limiter
-from src.db.models import AuthSession, Role, User, Worker
+from src.db.models import AuthSession, Role, Site, User, Worker
 from src.settings import settings
 from tests.conftest import TEST_DB_URL
 
@@ -99,6 +99,11 @@ def csrf(client: TestClient, admin: User) -> str:
     response = _user_login(client, ADMIN_EMAIL, ADMIN_PASSWORD)
     assert response.status_code == 200
     return response.json()["csrf_token"]
+
+
+def _main_site(db: Session) -> int:
+    """The site migration 0003 creates; every test database has it."""
+    return db.scalar(select(Site.id).where(Site.key == "main"))
 
 
 def _bearer(token: str) -> dict[str, str]:
@@ -483,7 +488,8 @@ class TestDashboardLogin:
         sample_image_bytes: bytes
     ) -> None:
         service.create_user(db, "sup@example.com", "Sup", Role.SUPERVISOR,
-                            "temporary passphrase", must_change_password=True)
+                            "temporary passphrase", must_change_password=True,
+                            site_id=_main_site(db))
         csrf = _user_login(client, "sup@example.com", "temporary passphrase").json()["csrf_token"]
         assert client.get("/api/v1/auth/me").json()["user"]["must_change_password"] is True
         monkeypatch.setattr(settings, "ppb_worker_auth", "required")
@@ -503,7 +509,8 @@ class TestRoles:
             return {"ok": True}
 
         service.create_user(db, ADMIN_EMAIL, "A", Role.ADMIN, ADMIN_PASSWORD)
-        service.create_user(db, "sup@example.com", "S", Role.SUPERVISOR, ADMIN_PASSWORD)
+        service.create_user(db, "sup@example.com", "S", Role.SUPERVISOR, ADMIN_PASSWORD,
+                            site_id=_main_site(db))
         main_client = TestClient(main.app, base_url="https://testserver")
         for email, expected in ((ADMIN_EMAIL, 200), ("sup@example.com", 403)):
             main_client.cookies.clear()

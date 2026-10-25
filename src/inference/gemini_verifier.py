@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from pydantic import BaseModel
 
+from src.admin import runtime
 from src.inference.schemas import GeminiVerification, ItemStatus, ItemVerification
 from src.settings import settings
 
@@ -248,7 +249,7 @@ def verify_items(
         nothing to check, or could not be completed for any reason. ``None``
         always means "leave the verdict as it is".
     """
-    if not items or not settings.ppb_gemini_verify:
+    if not items or not runtime.get("gemini_verify"):
         return None
     if not settings.google_api_key:
         logger.warning("GOOGLE_API_KEY not set — Gemini verification skipped.")

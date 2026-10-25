@@ -1,7 +1,7 @@
 # Phase 3 — Admin API contract
 
-**Status: draft 2, revised after Priyanka's review (2026-10-19). Nothing
-here is built yet.**
+**Status: agreed (draft 2, plus the fixes in PR #18). The backend (§3–§9)
+is built; the dashboard pages (§11) are in progress.**
 
 This is what the admin dashboard (Phase 4) calls to run the system: sites,
 the job PPE matrix, runtime settings, dashboard users, workers, and the

@@ -490,9 +490,9 @@ LOG_LEVEL=INFO
 | P2    | FastAPI inference server + compliance API             | ✅ Complete  |
 | P3    | React Native mobile app (camera + upload)             | ✅ Merged — on-device end-to-end test pending |
 | P4    | Gemini explanations + second opinion on NEEDS_REVIEW  | ✅ Complete  |
-| P5    | Job PPE Matrix in PostgreSQL + admin dashboard (React + Vite) | 🔄 Current — matrix in Postgres done |
+| P5    | Job PPE Matrix in PostgreSQL + admin dashboard (React + Vite) | 🔄 Current — matrix in Postgres, admin API (`docs/admin-api.md`) and dashboard skeleton done; dashboard pages pending |
 | P6    | Worker photo storage (kept for model training)        | ⬜ Planned   |
-| P7    | Login: admin & supervisor accounts, worker login (built into FastAPI; contract `docs/auth-api.md`) | 🔄 Current — backend built; app and dashboard pending |
+| P7    | Login: admin & supervisor accounts, worker login (built into FastAPI; contract `docs/auth-api.md`) | ✅ Built (backend, app, dashboard login) — switch to `PPB_WORKER_AUTH=required` per `docs/auth-api.md` §5 pending |
 | P8    | Live video mode                                       | ⬜ Future    |
 
 ---

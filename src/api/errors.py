@@ -23,6 +23,7 @@ class ApiError(Exception):
         detail: str,
         retry_after_s: float | None = None,
         field: str | None = None,
+        extra: dict | None = None,
     ) -> None:
         super().__init__(detail)
         self.status = status
@@ -30,6 +31,8 @@ class ApiError(Exception):
         self.detail = detail
         self.retry_after_s = None if retry_after_s is None else max(1, math.ceil(retry_after_s))
         self.field = field
+        # Additional top-level keys, e.g. ``current`` on a version conflict.
+        self.extra = extra or {}
 
     def body(self) -> dict:
         body: dict = {"detail": self.detail, "code": self.code}
@@ -37,6 +40,7 @@ class ApiError(Exception):
             body["retry_after_s"] = self.retry_after_s
         if self.field is not None:
             body["field"] = self.field
+        body.update(self.extra)
         return body
 
     def headers(self) -> dict[str, str]:

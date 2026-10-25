@@ -65,7 +65,8 @@ class PPEDetector:
     ) -> None:
         self.model_name = model_name or settings.ppb_model_name
         self.device = device or settings.ppb_device
-        self.confidence = confidence if confidence is not None else settings.ppb_confidence_threshold
+        # None: follow the live `confidence_threshold` setting (docs/admin-api.md §6).
+        self._fixed_confidence = confidence
         self.iou = iou if iou is not None else settings.ppb_iou_threshold
         self.weights_path = weights_path or MODELS_DIR / f"{self.model_name}_ppe_best.pt"
 
@@ -81,6 +82,15 @@ class PPEDetector:
         self._model = YOLO(str(self.weights_path))
         self.class_names: dict[int, str] = dict(self._model.names)
         logger.success(f"PPEDetector ready: {self.model_name} ({len(self.class_names)} classes)")
+
+    @property
+    def confidence(self) -> float:
+        """The detection threshold in use: the one passed in, else the live setting."""
+        if self._fixed_confidence is not None:
+            return self._fixed_confidence
+        from src.admin import runtime  # noqa: PLC0415 — avoids importing the DB layer early
+
+        return float(runtime.get("confidence_threshold"))
 
     def detect(self, image: "str | Path | np.ndarray | Any") -> tuple[list[Detection], float]:
         """Run PPE detection on one image.
