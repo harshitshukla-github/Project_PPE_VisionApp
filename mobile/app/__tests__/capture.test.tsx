@@ -5,7 +5,7 @@ import { Text } from "react-native";
 import CaptureScreen from "../(tabs)/capture";
 import { clearToken, setToken } from "../../src/api/client";
 import { SessionProvider, useSession } from "../../src/context/SessionContext";
-import { SIGNED_IN } from "../../src/testing/fixtures";
+import { SIGNED_IN, fail, mockRoutes, ok } from "../../src/testing/fixtures";
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
@@ -45,11 +45,14 @@ const mockFetch = jest.fn();
 // @ts-expect-error - test-only global fetch stub
 global.fetch = mockFetch;
 
-const JOBS_RESPONSE = {
-  welder: {
-    required: ["hardhat", "safety_vest", "goggles", "gloves"],
-    pending: ["face_shield", "boots"],
-  },
+const WELDER = {
+  required: ["hardhat", "safety_vest", "goggles", "gloves"],
+  pending: ["face_shield", "boots"],
+};
+const JOBS_RESPONSE = { welder: WELDER };
+/** The same list after an admin deactivated Welder. */
+const JOBS_WITHOUT_WELDER = {
+  general_labor: { required: ["hardhat", "safety_vest"], pending: ["boots"] },
 };
 
 const CHECK_RESPONSE = {
@@ -67,6 +70,25 @@ const CHECK_RESPONSE = {
   inference_time_ms: 30.1,
   gemini_invoked: false,
 };
+
+// What the fake server answers; a test changes these to change the server's mind.
+let jobsAnswer: () => ReturnType<typeof ok>;
+let checkAnswer: () => ReturnType<typeof ok>;
+
+function serve() {
+  mockRoutes(mockFetch, {
+    "/jobs": () => jobsAnswer(),
+    "/compliance/check": () => checkAnswer(),
+  });
+}
+
+/** Every request so far, as "GET /jobs"-style labels, in order. */
+function requests(): string[] {
+  return mockFetch.mock.calls.map(([url, init]) => {
+    const path = String(url).replace("http://192.168.1.5:8000/api/v1", "");
+    return `${init?.method ?? "GET"} ${path}`;
+  });
+}
 
 /** Shows the session state so tests can see what Capture did to it. */
 function AuthProbe() {
@@ -89,6 +111,12 @@ function renderCapture() {
   );
 }
 
+async function openCamera() {
+  renderCapture();
+  await screen.findByText("Fit your full body in frame");
+  mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
+}
+
 beforeEach(async () => {
   await clearToken();
   await setToken("test-token");
@@ -99,16 +127,16 @@ beforeEach(async () => {
   mockTakePictureAsync.mockReset();
   mockLaunchImageLibraryAsync.mockReset();
   mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-  mockFetch.mockResolvedValueOnce({
-    ok: true,
-    json: async () => JOBS_RESPONSE,
-  });
+  jobsAnswer = () => ok(JOBS_RESPONSE);
+  checkAnswer = () => ok(CHECK_RESPONSE);
+  serve();
 });
 
 describe("CaptureScreen", () => {
   it("prompts to pick a job on Home while no job category is loaded", async () => {
-    mockFetch.mockReset();
-    mockFetch.mockRejectedValueOnce(new TypeError("Network request failed"));
+    jobsAnswer = () => {
+      throw new TypeError("Network request failed");
+    };
     renderCapture();
 
     expect(await screen.findByText(/Pick a job category on Home first/)).toBeTruthy();
@@ -129,14 +157,7 @@ describe("CaptureScreen", () => {
   });
 
   it("submits a captured photo and navigates to Result on success", async () => {
-    renderCapture();
-    await screen.findByText("Fit your full body in frame");
-
-    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => CHECK_RESPONSE,
-    });
+    await openCamera();
 
     fireEvent.press(screen.getByTestId("shutter-button"));
 
@@ -148,11 +169,7 @@ describe("CaptureScreen", () => {
   });
 
   it("identifies the worker by token only: sends Authorization and no worker_id field", async () => {
-    renderCapture();
-    await screen.findByText("Fit your full body in frame");
-
-    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
-    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => CHECK_RESPONSE });
+    await openCamera();
 
     fireEvent.press(screen.getByTestId("shutter-button"));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
@@ -165,15 +182,8 @@ describe("CaptureScreen", () => {
   });
 
   it("sends the worker back to sign in when the session has ended (401 not_authenticated)", async () => {
-    renderCapture();
-    await screen.findByText("Fit your full body in frame");
-
-    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      json: async () => ({ detail: "Sign in again.", code: "not_authenticated" }),
-    });
+    checkAnswer = () => fail(401, { detail: "Sign in again.", code: "not_authenticated" });
+    await openCamera();
 
     fireEvent.press(screen.getByTestId("shutter-button"));
 
@@ -184,18 +194,9 @@ describe("CaptureScreen", () => {
   });
 
   it("opens Change PIN when the issued PIN must be replaced (403 pin_change_required)", async () => {
-    renderCapture();
-    await screen.findByText("Fit your full body in frame");
-
-    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      json: async () => ({
-        detail: "Choose your own PIN first.",
-        code: "pin_change_required",
-      }),
-    });
+    checkAnswer = () =>
+      fail(403, { detail: "Choose your own PIN first.", code: "pin_change_required" });
+    await openCamera();
 
     fireEvent.press(screen.getByTestId("shutter-button"));
 
@@ -205,17 +206,9 @@ describe("CaptureScreen", () => {
   });
 
   it("shows 'try again shortly' and no verdict when the server answers 503", async () => {
-    renderCapture();
-    await screen.findByText("Fit your full body in frame");
-
-    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 503,
-      json: async () => ({
-        detail: "Job requirements are temporarily unavailable. Try again shortly.",
-      }),
-    });
+    checkAnswer = () =>
+      fail(503, { detail: "Job requirements are temporarily unavailable. Try again shortly." });
+    await openCamera();
 
     fireEvent.press(screen.getByTestId("shutter-button"));
 
@@ -225,11 +218,10 @@ describe("CaptureScreen", () => {
   });
 
   it("shows an inline error banner when the check request fails", async () => {
-    renderCapture();
-    await screen.findByText("Fit your full body in frame");
-
-    mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
-    mockFetch.mockRejectedValueOnce(new TypeError("Network request failed"));
+    checkAnswer = () => {
+      throw new TypeError("Network request failed");
+    };
+    await openCamera();
 
     fireEvent.press(screen.getByTestId("shutter-button"));
 
@@ -242,18 +234,77 @@ describe("CaptureScreen", () => {
   it("picks from the gallery and submits when the camera isn't used", async () => {
     renderCapture();
     await screen.findByText("Fit your full body in frame");
-
     mockLaunchImageLibraryAsync.mockResolvedValueOnce({
       canceled: false,
       assets: [{ uri: "file:///gallery.jpg" }],
-    });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => CHECK_RESPONSE,
     });
 
     fireEvent.press(screen.getByText("Gallery"));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
+  });
+});
+
+describe("job list is refreshed before every check (docs/admin-api.md §2)", () => {
+  it("asks for the job list again, then sends the photo", async () => {
+    await openCamera();
+    const before = requests().length;
+
+    fireEvent.press(screen.getByTestId("shutter-button"));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
+
+    expect(requests().slice(before)).toEqual(["GET /jobs", "POST /compliance/check"]);
+  });
+
+  it("does not send the photo when an admin deactivated the job; asks the worker to pick again", async () => {
+    await openCamera();
+    jobsAnswer = () => ok(JOBS_WITHOUT_WELDER);
+
+    fireEvent.press(screen.getByTestId("shutter-button"));
+
+    expect(await screen.findByText(/Welder isn't available any more/)).toBeTruthy();
+    expect(requests()).not.toContain("POST /compliance/check");
+    expect(mockPush).not.toHaveBeenCalled();
+    // The camera is gone until a job is picked again: no check against some other job.
+    expect(screen.queryByTestId("camera-view")).toBeNull();
+  });
+
+  it("still sends the check when the job list can't be refreshed; the check reports the problem", async () => {
+    await openCamera();
+    jobsAnswer = () => {
+      throw new TypeError("Network request failed");
+    };
+
+    fireEvent.press(screen.getByTestId("shutter-button"));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
+    expect(requests()).toContain("POST /compliance/check");
+  });
+
+  it("422 unknown_job after the refresh: clears the selection and says the job is gone", async () => {
+    let lists = 0;
+    // Initial load and the pre-check refresh still list Welder; the look after the 422 doesn't.
+    jobsAnswer = () => (++lists <= 2 ? ok(JOBS_RESPONSE) : ok(JOBS_WITHOUT_WELDER));
+    checkAnswer = () =>
+      fail(422, { detail: "'welder' isn't an active job.", code: "unknown_job", field: "job_category" });
+    await openCamera();
+
+    fireEvent.press(screen.getByTestId("shutter-button"));
+
+    expect(await screen.findByText(/Welder isn't available any more/)).toBeTruthy();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(screen.queryByText(/isn't an active job/)).toBeNull(); // not the server's raw sentence
+  });
+
+  it("422 unknown_job while the list still has the job: amber 'try again shortly', selection kept", async () => {
+    checkAnswer = () =>
+      fail(422, { detail: "'welder' isn't an active job.", code: "unknown_job", field: "job_category" });
+    await openCamera();
+
+    fireEvent.press(screen.getByTestId("shutter-button"));
+
+    expect(await screen.findByText(/That job isn't available right now/)).toBeTruthy();
+    expect(screen.getByTestId("camera-view")).toBeTruthy();
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });
