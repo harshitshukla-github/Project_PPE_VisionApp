@@ -37,7 +37,10 @@ supervisor belongs to exactly one site and sees only that site's workers.
 
 - Anything else returns `403 forbidden`.
 - A supervisor asking for a worker at another site gets `404 not_found`, so
-  the API doesn't reveal which worker IDs exist elsewhere.
+  the API doesn't reveal anything about another site's workers. The one
+  exception is creating a worker whose ID is already taken: `409
+  already_exists` says the ID is taken, not where. Worker IDs are printed on
+  badges, so this is accepted.
 - A user who still has to change their password gets
   `403 password_change_required` on every endpoint here.
 - The job matrix is shared by all sites in this phase. Per-site job lists can
@@ -77,7 +80,7 @@ Codes added by this contract:
 | 422 | `unknown_item` | A requirement names an item that isn't in the catalogue |
 | 422 | `no_required_item` | A job would have no required item. This applies to every job, active or not |
 | 422 | `out_of_range` | A setting is outside its allowed range (§6) |
-| 422 | `invalid` | Anything else malformed: an item listed twice, an incomplete job order, a bad email or name, a supervisor without a site |
+| 422 | `invalid` | Anything else malformed: an item listed twice, an incomplete job order, a bad email or name, a supervisor without a site, a deactivated site (`field: "site"`) |
 
 For the mobile app, `POST /compliance/check` answers `422 unknown_job` when
 the job key doesn't exist or the job has been deactivated (INSTRUCTIONS.md).
@@ -104,10 +107,11 @@ about, so the dashboard can put a badge on the right cell or field:
 | `gemini_only_item` | `item` | Job create or requirements: a required item the detector can't see |
 | `gemini_verify_off` | none | Job create or requirements, while `gemini_verify` is off: anything the detector misses stays "Needs review" |
 | `worker_auth_required` | `setting` | Settings: checks from an app without login will now be refused |
-| `gemini_verify_off` | `setting` | Settings: turning `gemini_verify` off |
+| `gemini_verify_switched_off` | `setting` | Settings: turning `gemini_verify` off |
 | `threshold_changed` | `setting` | Settings: every verdict from now on uses the new detector threshold |
 
-`message` is a sentence for a person; branch on `code`.
+`message` is a sentence for a person; branch on `code`. A code always has the
+same extra key, so a typed client can rely on it.
 
 ### Lists
 
@@ -371,6 +375,7 @@ A JSON Merge Patch (RFC 7396) of setting values:
 - A setting left out is unchanged.
 - A setting given a value is set to it.
 - `null` clears the override, returning the setting to its `.env` default.
+- The patch is all or nothing: if any one value is rejected, none is saved.
 
 `200 OK` with `{ "settings": [ …full list as GET… ], "warnings": [ … ],
 "applies_within_s": 30 }`. `warnings` is always present, empty when there is
@@ -422,7 +427,8 @@ Every user, active or not.
 - A supervisor needs an active `site`; an admin must not have one
   (`422 invalid`).
 - Errors: `409 already_exists`, `404 not_found` for an unknown site,
-  `422 invalid` for an invalid email, name or site combination.
+  `422 invalid` for an invalid email, name or site combination, or for a
+  deactivated site (`field: "site"`).
 
 ### `PATCH /users/{id}`
 
@@ -435,9 +441,10 @@ Any field may be left out. `200 OK` with `{ "user": … }`.
 - Making someone an admin clears their site. Making someone a supervisor
   needs a site in the same request.
 - Deactivating a user ends all their sessions at once.
-- Errors: `404 not_found`, `409 cannot_change_self` (your own role, site or
-  active flag), `409 last_admin` (no active admin would remain),
-  `422 invalid`.
+- Errors: `404 not_found` (the user, or an unknown `site`),
+  `409 cannot_change_self` (your own role, site or active flag),
+  `409 last_admin` (no active admin would remain), `422 invalid` (including a
+  deactivated `site`, `field: "site"`).
 
 ### `POST /users/{id}/reset-password`
 
@@ -464,6 +471,10 @@ sessions and unlocks them. Resetting your own password here is refused
   "created_by": "supervisor@example.com"
 }
 ```
+
+`created_by` is the email of the user who made the worker, or `null` for a
+worker made from the command line (`cli.py auth create-worker`). The audit log
+records those as actor `cli`.
 
 Worker IDs are unique across all sites.
 
@@ -497,7 +508,8 @@ One worker. `worker_id` matches without regard to case.
 - An admin must give `site`. A supervisor's new workers go to their own
   site; any other `site` is `403 forbidden`.
 - Errors: `409 already_exists`, `404 not_found` for an unknown site,
-  `422` for an invalid worker ID (`auth-api.md` §4) or name.
+  `422 invalid` for an invalid worker ID (`auth-api.md` §4) or name, or for a
+  deactivated site (`field: "site"`).
 
 ### `PATCH /workers/{worker_id}`
 
@@ -506,6 +518,9 @@ One worker. `worker_id` matches without regard to case.
 ```
 
 `200 OK` with `{ "worker": … }`. Only an admin may change `site`.
+Errors: `404 not_found` (the worker, or an unknown `site`),
+`403 forbidden` (a supervisor sending `site`), `422 invalid` (a deactivated
+`site`, `field: "site"`).
 Deactivating a worker ends their sessions at once. Workers are never
 deleted here; erasing a worker's data on request belongs with photo storage
 in Phase 5.
@@ -598,6 +613,10 @@ the read-only matrix. Don't build a review view yet.
     `audit_log` (columns as §9)
 - The endpoints above, using `require_user(...)` from Phase 2 with the roles
   in §1, and site scoping for supervisors
+- `site` in the `user` object of `POST /auth/login` and `GET /auth/me`
+  (`auth-api.md` §6): the site key, `null` for an admin. The dashboard needs
+  it on every page load, to hide the site filter from a supervisor and to
+  default the site of a new worker
 - Settings read through a cache like the job matrix, so the detector
   threshold, Gemini verification and worker login follow a change without a
   restart. Cache invalidation after every matrix or settings write

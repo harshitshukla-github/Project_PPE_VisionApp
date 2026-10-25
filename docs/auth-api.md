@@ -196,7 +196,9 @@ Then:
 - **Who:** Harshit (an admin).
 - **How:** `PPB_WORKER_AUTH=required` in `.env` and a restart, or the
   `worker_auth` setting in the dashboard once Phase 3 is built (which also
-  records it in the audit log).
+  records it in the audit log). Once a value has been saved in the dashboard
+  it wins over `.env`: `GET /settings` shows `overridden: true`, and a later
+  edit of `.env` has no effect until the override is cleared (`null`).
 - **Undo:** set it back to `optional`. Phones with the login build keep
   working either way.
 - **Record it:** add the date of the switch to this section.
@@ -231,12 +233,17 @@ The dashboard is served by the same FastAPI server at `/admin` (see
     "email": "admin@example.com",
     "display_name": "Harshit",
     "role": "admin",
+    "site": null,
     "must_change_password": false
   },
   "csrf_token": "f8Q2…",
   "expires_at": "2026-10-16T03:12:00Z"
 }
 ```
+
+`site` is the site key a supervisor belongs to (`admin-api.md` §3), and `null`
+for an admin, who works across all sites. It is added when sites arrive in
+Phase 3 (migration `0003`).
 
 Errors: `401 invalid_credentials`, `403 account_disabled`,
 `423 account_locked`, `429 too_many_attempts`.
