@@ -12,6 +12,13 @@ Login (Phase 2, contract in ``docs/auth-api.md``):
 - ``workers``   people who run checks from the mobile app
 - ``sessions``  one row per login, for a user or a worker; tokens stored hashed
 
+Admin system (Phase 3, contract in ``docs/admin-api.md``):
+
+- ``sites``         places where workers are checked; every worker and every
+                    supervisor belongs to one
+- ``app_settings``  values saved from the dashboard that override ``.env``
+- ``audit_log``     every change made through the admin API or the CLI
+
 Schema changes go through Alembic (``src/db/migrations``); after editing
 these classes, add a migration. ``tests/test_db_matrix.py`` fails if the
 models and the migrations disagree.
@@ -21,8 +28,10 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -33,6 +42,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # Stable constraint names, so migrations can refer to them.
@@ -72,6 +82,25 @@ class PpeItem(Base):
     __table_args__ = (CheckConstraint("key ~ '^[a-z][a-z0-9_]*$'", name="key_format"),)
 
 
+class Site(Base):
+    """A place where workers are checked: a construction site, a plant."""
+
+    __tablename__ = "sites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True)
+    display_name: Mapped[str] = mapped_column(String(100))
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (CheckConstraint("key ~ '^[a-z][a-z0-9_]*$'", name="key_format"),)
+
+
 class Job(Base):
     """A job category and the order it appears in the app."""
 
@@ -82,6 +111,9 @@ class Job(Base):
     display_name: Mapped[str] = mapped_column(String(100))
     position: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # Goes up with every change to the name, the active flag or the
+    # requirements (not the position), so a stale edit can be refused.
+    version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -135,6 +167,10 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(254), unique=True)
     display_name: Mapped[str] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(16))
+    # A supervisor's site; admins work across all sites and have none.
+    site_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sites.id", ondelete="RESTRICT"), index=True
+    )
     password_hash: Mapped[str] = mapped_column(String(255))
     must_change_password: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
@@ -148,9 +184,12 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    site: Mapped[Site | None] = relationship()
+
     __table_args__ = (
         CheckConstraint("role IN ('admin', 'supervisor')", name="role_valid"),
         CheckConstraint("email = lower(email)", name="email_lowercase"),
+        CheckConstraint("(role = 'supervisor') = (site_id IS NOT NULL)", name="site_matches_role"),
     )
 
 
@@ -163,6 +202,7 @@ class Worker(Base):
     # What the API calls ``worker_id``, e.g. "W-0042". Stored upper case.
     worker_code: Mapped[str] = mapped_column(String(32), unique=True)
     display_name: Mapped[str] = mapped_column(String(100))
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="RESTRICT"), index=True)
     pin_hash: Mapped[str] = mapped_column(String(255))
     # True while the worker still has the PIN a supervisor issued.
     must_change_pin: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
@@ -177,6 +217,9 @@ class Worker(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    site: Mapped[Site] = relationship()
+    creator: Mapped[User | None] = relationship(foreign_keys=[created_by])
 
     __table_args__ = (
         CheckConstraint("worker_code ~ '^[A-Z0-9][A-Z0-9-]{1,31}$'", name="worker_code_format"),
@@ -219,3 +262,38 @@ class AuthSession(Base):
     __table_args__ = (
         CheckConstraint("(user_id IS NULL) <> (worker_id IS NULL)", name="one_owner"),
     )
+
+
+class AppSetting(Base):
+    """A runtime setting saved from the dashboard, overriding its ``.env`` default."""
+
+    __tablename__ = "app_settings"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[Any] = mapped_column(JSONB)
+    updated_by: Mapped[str | None] = mapped_column(String(254))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AuditEntry(Base):
+    """One change made through the admin API or the CLI (docs/admin-api.md §9).
+
+    ``before`` and ``after`` hold only the documented keys for the action,
+    and never a password, PIN, hash or token.
+    """
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    actor: Mapped[str] = mapped_column(String(254))
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    target: Mapped[str] = mapped_column(String(160), index=True)
+    site: Mapped[str | None] = mapped_column(String(64), index=True)
+    before: Mapped[Any | None] = mapped_column(JSONB)
+    after: Mapped[Any | None] = mapped_column(JSONB)
+    ip: Mapped[str | None] = mapped_column(String(64))

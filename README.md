@@ -209,6 +209,33 @@ use the dashboard over plain `http://` on a LAN address.
 that forgets its login check fails CI until it is either protected or added
 to the test's list of public routes.
 
+## Admin API (Phase 3)
+
+The contract is [`docs/admin-api.md`](docs/admin-api.md): everything the
+dashboard calls, under `/api/v1/admin`, behind the dashboard login.
+
+| Area | Who |
+|---|---|
+| Sites, the job matrix and jobs, runtime settings, dashboard users, audit log | Admins (supervisors may read sites, items and jobs) |
+| Workers: list, add, rename, deactivate, reset PIN | Admins for every site; supervisors for their own site only |
+
+- **Sites.** Every worker and supervisor belongs to one site; admins have
+  none. Migration `0003` puts existing workers and supervisors in a `main`
+  site. `cli.py sites list` / `cli.py sites create --key … --name …`, and
+  `cli.py auth create-worker` takes `--site` once there is more than one.
+- **Live settings.** The detector threshold, Gemini verification, Gemini's
+  minimum confidence and `worker_auth` can be changed from the dashboard
+  without a restart; a saved value overrides `.env` until it is cleared, and
+  reaches every server within `PPB_MATRIX_CACHE_S`.
+- **Audit log.** Every change through the API, and every account or site
+  made from the CLI, is recorded in the same transaction as the change,
+  without passwords, PINs, hashes or tokens.
+- **Accuracy per item.** Training saves per-class AP50 next to the weights
+  (`models/<model>_ppe_best.metrics.json`), and `GET /admin/items` shows it
+  for the loaded model. Keep that file with the weights when you copy them.
+
+After pulling, run `uv run python cli.py db migrate` to reach migration `0003`.
+
 ## Project layout
 
 ```

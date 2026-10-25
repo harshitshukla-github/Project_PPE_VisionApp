@@ -71,6 +71,13 @@ auth_app = typer.Typer(
 )
 app.add_typer(auth_app, name="auth")
 
+sites_app = typer.Typer(
+    help="Sites: where workers are checked. Every worker belongs to one.",
+    rich_markup_mode="markdown",
+    no_args_is_help=True,
+)
+app.add_typer(sites_app, name="sites")
+
 console = Console()
 
 # ---------------------------------------------------------------------------
@@ -1086,11 +1093,25 @@ def auth_create_admin_cmd(
 def auth_create_worker_cmd(
     worker_id: str = typer.Option(..., "--worker-id", help="e.g. W-0042"),
     name: str = typer.Option(..., "--name", help="The worker's name."),
+    site: str | None = typer.Option(
+        None, "--site", help="Site key. Optional while there is only one active site."
+    ),
 ) -> None:
     """Create a worker and print their **one-time PIN**."""
-    from src.auth.service import create_worker
+    from sqlalchemy import select
 
-    worker, pin = _run_account_command(lambda db: create_worker(db, worker_id, name))
+    from src.auth.service import create_worker
+    from src.db.models import Site
+
+    def action(db):
+        site_id = None
+        if site:
+            site_id = db.scalar(select(Site.id).where(Site.key == site))
+            if site_id is None:
+                raise ValueError(f"No site '{site}'. See `cli.py sites list`.")
+        return create_worker(db, worker_id, name, site_id=site_id)
+
+    worker, pin = _run_account_command(action)
     _print_one_time_pin(worker.worker_code, worker.display_name, pin)
 
 
@@ -1105,6 +1126,65 @@ def auth_reset_pin_cmd(
 
     worker, pin = _run_account_command(lambda db: reset_worker_pin(db, worker_id))
     _print_one_time_pin(worker.worker_code, worker.display_name, pin)
+
+
+# ---------------------------------------------------------------------------
+# sites commands (docs/admin-api.md §3)
+# ---------------------------------------------------------------------------
+
+@sites_app.command("list")
+def sites_list_cmd() -> None:
+    """List every site, with how many active workers each has."""
+    from sqlalchemy import func, select
+
+    from src.db.models import Site, Worker
+
+    def action(db):
+        counts = dict(db.execute(select(Worker.site_id, func.count())
+                                 .where(Worker.is_active.is_(True))
+                                 .group_by(Worker.site_id)).all())
+        return [(s.key, s.display_name, s.is_active, counts.get(s.id, 0))
+                for s in db.scalars(select(Site).order_by(Site.key))]
+
+    table = Table(title="Sites", header_style="bold blue")
+    for column in ("Key", "Name", "Active", "Active workers"):
+        table.add_column(column)
+    for key, display_name, is_active, workers in _run_account_command(action):
+        table.add_row(key, display_name, "yes" if is_active else "no", str(workers))
+    console.print(table)
+
+
+@sites_app.command("create")
+def sites_create_cmd(
+    key: str = typer.Option(..., "--key", help="Lowercase identifier, e.g. pune_tower_b"),
+    name: str = typer.Option(..., "--name", help="Display name, e.g. \"Pune Tower B\""),
+) -> None:
+    """Create a site. Recorded in the audit log with actor `cli`."""
+    from sqlalchemy.exc import IntegrityError
+
+    from src.admin import audit
+    from src.admin.common import KEY_PATTERN
+    from src.db.models import Site
+
+    if not KEY_PATTERN.fullmatch(key):
+        console.print("[red]A key is 2-64 characters: a lowercase letter, then lowercase "
+                      "letters, digits or underscores.[/red]")
+        raise typer.Exit(code=1)
+    display_name = " ".join(name.split())
+
+    def action(db):
+        db.add(Site(key=key, display_name=display_name))
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise ValueError(f"Site '{key}' already exists.") from None
+        audit.record(db, actor=audit.CLI_ACTOR, action="site.create", target=f"site:{key}",
+                     site=key, after={"key": key, "display_name": display_name})
+        db.commit()
+
+    _run_account_command(action)
+    console.print(f"[green]Created site {key} ({display_name}).[/green]")
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,8 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from src.admin import audit
+from src.admin.audit import CLI_ACTOR
 from src.auth.crypto import (
     generate_pin,
     hash_secret,
@@ -34,7 +36,7 @@ from src.auth.crypto import (
 )
 from src.auth.errors import AuthError, human_duration
 from src.auth.ratelimit import ip_limiter
-from src.db.models import AuthSession, Role, User, Worker
+from src.db.models import AuthSession, Role, Site, User, Worker
 from src.settings import settings
 
 MAX_FAILED_ATTEMPTS = 5
@@ -238,16 +240,22 @@ def change_user_password(db: Session, record: AuthSession, current_password: str
 
 
 # ---------------------------------------------------------------------------
-# Creating accounts (CLI now, admin API in Phase 3)
+# Creating accounts (CLI and the admin API), recorded in the audit log
 # ---------------------------------------------------------------------------
 
 
 def create_user(db: Session, email: str, display_name: str, role: Role, password: str,
-                must_change_password: bool = False) -> User:
-    """Create a dashboard account.
+                must_change_password: bool = False, site_id: int | None = None,
+                actor: str = CLI_ACTOR, ip: str | None = None) -> User:
+    """Create a dashboard account, and record it in the audit log.
+
+    Args:
+        site_id: Required for a supervisor, and must be omitted for an admin.
+        actor: Who is creating it: a user's email, or ``cli``.
 
     Raises:
-        ValueError: The email, name or password is unusable, or the email is taken.
+        ValueError: The email, name, password or site is unusable, or the
+            email is taken.
     """
     email = normalize_email(email)
     if not is_valid_email(email):
@@ -256,26 +264,43 @@ def create_user(db: Session, email: str, display_name: str, role: Role, password
     problem = password_problem(password, email)
     if problem:
         raise ValueError(problem)
-    user = User(email=email, display_name=name, role=Role(role).value,
+    role = Role(role)
+    if role is Role.SUPERVISOR and site_id is None:
+        raise ValueError("A supervisor needs a site.")
+    if role is Role.ADMIN and site_id is not None:
+        raise ValueError("An admin works across all sites and has no site.")
+    site_key = _active_site_key(db, site_id) if site_id is not None else None
+
+    user = User(email=email, display_name=name, role=role.value, site_id=site_id,
                 password_hash=hash_secret(password), must_change_password=must_change_password)
     db.add(user)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         db.rollback()
         raise ValueError(f"An account for {email} already exists.") from None
+    audit.record(db, actor=actor, action="user.create", target=f"user:{email}", site=site_key,
+                 after={"email": email, "display_name": name, "role": role.value,
+                        "site": site_key}, ip=ip)
+    db.commit()
     return user
 
 
-def create_worker(db: Session, worker_id: str, display_name: str,
-                  created_by: int | None = None) -> tuple[Worker, str]:
+def create_worker(db: Session, worker_id: str, display_name: str, site_id: int | None = None,
+                  created_by: int | None = None, actor: str = CLI_ACTOR,
+                  ip: str | None = None) -> tuple[Worker, str]:
     """Create a worker with a one-time PIN, which must be changed at first login.
+
+    Args:
+        site_id: The worker's site. May be omitted only while there is exactly
+            one active site, which is then used.
+        actor: Who is creating it: a user's email, or ``cli``.
 
     Returns:
         The worker, and the PIN to hand over. It is not stored anywhere.
 
     Raises:
-        ValueError: The worker ID or name is unusable, or the ID is taken.
+        ValueError: The worker ID, name or site is unusable, or the ID is taken.
     """
     code = normalize_worker_code(worker_id)
     if not is_valid_worker_code(code):
@@ -283,19 +308,29 @@ def create_worker(db: Session, worker_id: str, display_name: str,
             f"'{worker_id}' is not a valid worker ID: use 2-32 letters, digits and "
             "hyphens, not starting with a hyphen."
         )
+    name = _clean_name(display_name)
+    if site_id is None:
+        site_id = _only_active_site_id(db)
+    site_key = _active_site_key(db, site_id)
+
     pin = generate_pin()
-    worker = Worker(worker_code=code, display_name=_clean_name(display_name),
+    worker = Worker(worker_code=code, display_name=name, site_id=site_id,
                     pin_hash=hash_secret(pin), must_change_pin=True, created_by=created_by)
     db.add(worker)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         db.rollback()
         raise ValueError(f"Worker {code} already exists.") from None
+    audit.record(db, actor=actor, action="worker.create", target=f"worker:{code}",
+                 site=site_key, after={"worker_id": code, "display_name": name,
+                                       "site": site_key}, ip=ip)
+    db.commit()
     return worker, pin
 
 
-def reset_worker_pin(db: Session, worker_id: str) -> tuple[Worker, str]:
+def reset_worker_pin(db: Session, worker_id: str, actor: str = CLI_ACTOR,
+                     ip: str | None = None) -> tuple[Worker, str]:
     """Issue a new one-time PIN, unlock the worker and end all their sessions.
 
     Raises:
@@ -313,8 +348,25 @@ def reset_worker_pin(db: Session, worker_id: str) -> tuple[Worker, str]:
     worker.failed_attempts = 0
     worker.locked_until = None
     _revoke_others(db, AuthSession.worker_id == worker.id, keep=None, now=now)
+    audit.record(db, actor=actor, action="worker.reset_pin", target=f"worker:{code}",
+                 site=worker.site.key, ip=ip)
     db.commit()
     return worker, pin
+
+
+def _active_site_key(db: Session, site_id: int) -> str:
+    site = db.get(Site, site_id)
+    if site is None or not site.is_active:
+        raise ValueError("That site doesn't exist or has been deactivated.")
+    return site.key
+
+
+def _only_active_site_id(db: Session) -> int:
+    sites = db.scalars(select(Site).where(Site.is_active.is_(True)).order_by(Site.key)).all()
+    if len(sites) != 1:
+        keys = ", ".join(site.key for site in sites) or "none"
+        raise ValueError(f"Choose a site for the worker (active sites: {keys}).")
+    return sites[0].id
 
 
 # ---------------------------------------------------------------------------
