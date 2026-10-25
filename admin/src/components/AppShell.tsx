@@ -6,9 +6,9 @@ import { PAGES } from "../pages/registry";
 
 /**
  * The frame around every page: the navigation (only the pages this role can
- * use), who is signed in, and Sign out. While the admin API is faked, a
- * banner says so on every page, so nobody mistakes sample data for the real
- * thing.
+ * use), who is signed in, and Sign out. While the admin API is faked (opt-in:
+ * `VITE_ADMIN_API=mock`), a banner says so on every page, so nobody mistakes
+ * sample data for the real thing.
  */
 export function AppShell({ user, path, children }: { user: DashboardUser; path: string; children: ReactNode }) {
   const { signOut } = useAuth();
@@ -18,7 +18,7 @@ export function AppShell({ user, path, children }: { user: DashboardUser; path: 
     <div className="shell">
       {adminApiIsMocked() && (
         <div className="mock-banner" role="note" data-testid="mock-banner">
-          Sample data: the admin API isn&apos;t built yet, so nothing you change here reaches the server, and a reload starts again.
+          Sample data: these pages are showing made-up data from your browser, not the server. Nothing you change here is saved, and a reload starts again.
         </div>
       )}
       <header className="topbar">

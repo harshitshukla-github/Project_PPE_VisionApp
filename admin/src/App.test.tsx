@@ -377,3 +377,33 @@ describe("the signed-in dashboard", () => {
     expect(await screen.findByTestId("mock-banner")).toHaveTextContent("Sample data");
   });
 });
+
+describe("the admin API: real by default, a stand-in only on request", () => {
+  it("shows no sample-data banner when the pages talk to the real server", async () => {
+    setAdminTransport(null); // the real fetch, which this test answers with empty lists
+    mockApi({
+      "GET /api/v1/auth/me": () => ok(ADMIN_SESSION),
+      "GET /api/v1/admin/items": () => ok([]),
+      "GET /api/v1/admin/jobs": () => ok([]),
+    });
+    renderApp();
+
+    expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+    expect(screen.queryByTestId("mock-banner")).toBeNull();
+  });
+
+  it("asks the real server for /api/v1/admin/* when no stand-in is switched on", async () => {
+    setAdminTransport(null);
+    const fetchMock = mockApi({
+      "GET /api/v1/auth/me": () => ok(ADMIN_SESSION),
+      "GET /api/v1/admin/items": () => ok([]),
+      "GET /api/v1/admin/jobs": () => ok([]),
+    });
+    renderApp();
+    await screen.findByRole("heading", { name: "Job matrix" });
+
+    const asked = fetchMock.mock.calls.map(([url]) => url);
+    expect(asked).toContain("/api/v1/admin/items");
+    expect(asked).toContain("/api/v1/admin/jobs");
+  });
+});

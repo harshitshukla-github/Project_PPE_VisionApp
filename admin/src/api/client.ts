@@ -84,21 +84,19 @@ export class ApiError extends Error {
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
- * Is the `/admin/*` API faked in the browser? `VITE_ADMIN_API=mock|real` says
- * so explicitly; without it, `npm run dev` uses the mock and a production
- * build uses the real server. Switching to the real backend is one line in
- * `.env.development` (`VITE_ADMIN_API=real`).
+ * Is the `/admin/*` API faked in the browser? Only when `VITE_ADMIN_API=mock`
+ * says so: by default the dashboard talks to the real server. The stand-in is
+ * for working without a backend, and for seeing a supervisor's view without a
+ * supervisor account.
  */
-const MOCK_ADMIN_API =
-  import.meta.env.VITE_ADMIN_API === "mock" ||
-  (import.meta.env.VITE_ADMIN_API === undefined && import.meta.env.DEV);
+const MOCK_ADMIN_API = import.meta.env.VITE_ADMIN_API === "mock";
 
 let adminTransport: FetchLike | undefined;
 let mockTransport: Promise<FetchLike> | undefined;
 
-/** Is the admin API being faked? The shell shows a banner while it is. */
+/** Is the admin API being faked (the stand-in, or a test's transport)? The shell shows a banner while it is. */
 export function adminApiIsMocked(): boolean {
-  return MOCK_ADMIN_API;
+  return MOCK_ADMIN_API || (adminTransport !== undefined && adminTransport !== realFetch);
 }
 
 /** For tests: send `/admin/*` calls here instead (null = the real fetch). */

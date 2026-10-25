@@ -21,7 +21,16 @@ stored until Phase 5 (`docs/admin-api.md` §10).
 
 ## Run it
 
-Start the backend first (`uv run python cli.py serve --model yolo11n --device cpu --port 8000`),
+The pages need the Phase 3 admin API (`/api/v1/admin/*`, on `main`), which
+needs the database at migration `0003`. Bring the backend up to date first:
+
+```bash
+git switch main && git pull
+uv sync
+uv run python cli.py db migrate        # schema at 0003
+uv run python cli.py serve --model yolo11n --device cpu --port 8000
+```
+
 then:
 
 ```bash
@@ -47,31 +56,28 @@ ever talks to `localhost:5173`. That keeps the session cookie
 - **Over a LAN address** (`http://192.168.x.x:5173`) the cookie also needs
   `PPB_COOKIE_SECURE=false`.
 
-## Sample data until the backend exists
+## Sample data, when you want it
 
-The `/admin/*` endpoints are Phase 3 and aren't built yet. Until they are,
-`npm run dev` answers them from a stand-in in the browser
-(`src/mock/backend.ts`) that follows `docs/admin-api.md` exactly: the same
-shapes, error codes, roles, site scoping, versions, warnings and audit entries.
-Sign-in (`/auth/*`) is always the real server. A banner on every page says when
-the data is sample data, and a reload starts from the seed again.
-
-**To switch to the real backend, set one line** in `admin/.env.development.local`
-(or any `.env` file Vite reads):
+By default the pages talk to the real server. To work without a backend, or to
+see what a supervisor sees without having a supervisor account, answer the
+`/admin/*` calls from a stand-in in the browser instead. Put one line in
+`admin/.env.development.local` (any `.env` file Vite reads):
 
 ```
-VITE_ADMIN_API=real
+VITE_ADMIN_API=mock
 ```
 
-`VITE_ADMIN_API=mock` forces the stand-in. With it unset, `npm run dev` uses
-the stand-in and a production build uses the real server. The stand-in is
-loaded on demand and left out of production builds (checked: none of its data
-is in the built files).
+The stand-in (`src/mock/backend.ts`) follows `docs/admin-api.md`: the same
+shapes, error codes, roles, site scoping, versions, warnings and audit entries,
+and it knows who is signed in, so a supervisor really gets a supervisor's view.
+Sign-in (`/auth/*`) is still the real server. A banner on every page says the
+data is sample data, and a reload starts from the seed again.
 
-The stand-in knows who is signed in, so a supervisor really gets a supervisor's
-view. The real login can't give you one until a supervisor account exists, but
-the tests cover it, and `src/testing/harness.ts` shows how to start the
-stand-in as any user.
+The stand-in is loaded on demand and left out of production builds (checked:
+none of its data is in the built files). It was written against the contract
+before the backend existed, then compared with the backend's code: the same
+routes, field names, warning codes, settings descriptors and error fields.
+`src/testing/harness.ts` shows how a test starts it as any user.
 
 ## Check it
 
