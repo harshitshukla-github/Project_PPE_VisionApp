@@ -202,7 +202,15 @@ export function MatrixPage({ user }: { user: DashboardUser }) {
                   <th scope="col" key={item.key}>
                     {item.display_name}
                     <small className="muted">
-                      {item.detector_ap50 !== null ? `AP50 ${item.detector_ap50.toFixed(2)}` : <Tag tone="warn">Gemini only</Tag>}
+                      {item.detector_ap50 !== null ? (
+                        `AP50 ${item.detector_ap50.toFixed(2)}`
+                      ) : item.detectable ? (
+                        // The detector can see it, but the loaded model has no accuracy figure for it
+                        // (no metrics file): not the same as "only Gemini can judge it".
+                        <Tag>No AP50</Tag>
+                      ) : (
+                        <Tag tone="warn">Gemini only</Tag>
+                      )}
                     </small>
                   </th>
                 ))}

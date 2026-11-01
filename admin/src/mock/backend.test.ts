@@ -79,7 +79,9 @@ describe("items and jobs (§4, §5)", () => {
 
     const geminiOnly = items.filter((i: { detectable: boolean }) => !i.detectable).map((i: { key: string }) => i.key);
     expect(geminiOnly).toEqual(["face_shield", "ear_protection", "harness"]);
-    for (const item of items) expect(item.detector_ap50 === null).toBe(!item.detectable); // an AP50 only where there is a detector
+    // One direction only (docs/admin-api.md §4): an item the detector can't see has no accuracy figure.
+    // The other way round isn't a rule: a detectable item may have none too, when the loaded model has no metrics file.
+    for (const item of items) if (!item.detectable) expect(item.detector_ap50).toBeNull();
   });
 
   it("warns when Ear protection is made required, since only Gemini can judge it", async () => {
