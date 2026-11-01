@@ -16,19 +16,21 @@ from sqlalchemy.orm import Session, selectinload
 
 from src.db.models import Job, JobRequirement, PpeItem, RequirementMode
 
-# Every item the system knows. ``detectable`` is whether the detector was
-# trained on it; the others can only be judged by Gemini.
+# Every item the system knows, in display order: head to toe, the way a
+# worker is looked over (docs/admin-api.md §4). ``detectable`` is whether the
+# detector was trained on it; the others can only be judged by Gemini.
 ITEMS: tuple[tuple[str, str, bool], ...] = (
     ("hardhat", "Hardhat", True),
-    ("safety_vest", "Safety vest", True),
     ("goggles", "Goggles", True),
+    ("face_shield", "Face shield", False),
+    ("ear_protection", "Ear protection", False),
     ("mask", "Mask", True),
+    ("safety_vest", "Safety vest", True),
+    ("harness", "Harness", False),
     ("gloves", "Gloves", True),
     ("boots", "Boots", True),
-    ("ear_protection", "Ear protection", False),
-    ("face_shield", "Face shield", False),
-    ("harness", "Harness", False),
 )
+ITEM_ORDER: dict[str, int] = {key: index for index, (key, _, _) in enumerate(ITEMS)}
 
 
 @dataclass(frozen=True)

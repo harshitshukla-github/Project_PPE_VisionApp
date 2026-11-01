@@ -22,6 +22,7 @@ from src.admin.metrics import load_ap50
 from src.admin.views import audit_view, user_view, worker_view
 from src.api.deps import get_detector
 from src.auth.deps import client_ip, db_session, require_user
+from src.db.matrix import ITEM_ORDER
 from src.db.models import AuthSession, PpeItem, Role
 from src.inference.detector import PPEDetector
 
@@ -142,12 +143,14 @@ def update_site(key: str, body: SitePatch, request: Request, record: AuthSession
 @router.get("/items")
 def list_items(record: AuthSession = ANY_USER, db: Session = Depends(db_session),
                detector: PPEDetector = Depends(get_detector)) -> list[dict]:
-    """The catalogue, with the loaded model's AP50 per item where it has one."""
+    """The catalogue head to toe, with the loaded model's AP50 per item where it has one."""
     ap50 = load_ap50(detector.weights_path)
+    catalogue = sorted(db.query(PpeItem),
+                       key=lambda item: (ITEM_ORDER.get(item.key, len(ITEM_ORDER)), item.key))
     return [
         {"key": item.key, "display_name": item.display_name, "detectable": item.detectable,
          "detector_ap50": ap50.get(item.key) if item.detectable else None}
-        for item in db.query(PpeItem).order_by(PpeItem.key)
+        for item in catalogue
     ]
 
 

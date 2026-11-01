@@ -228,6 +228,13 @@ class TestSites:
 
 
 class TestItems:
+    def test_items_come_head_to_toe(self, admin: Browser) -> None:
+        """The matrix's columns follow this order, so it is fixed, not alphabetical."""
+        assert [i["key"] for i in admin.get("/items").json()] == [
+            "hardhat", "goggles", "face_shield", "ear_protection", "mask", "safety_vest",
+            "harness", "gloves", "boots",
+        ]
+
     def test_accuracy_comes_from_the_models_metrics_file(
         self, admin: Browser, fake_detector, tmp_path: Path
     ) -> None:
