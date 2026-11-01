@@ -743,7 +743,8 @@ def serve_cmd(
 
     console.print(Panel(
         f"Serving [bold cyan]{model.value}[/] on [bold]http://{host}:{port}[/]\n"
-        f"Docs: [bold]http://{host if host != '0.0.0.0' else 'localhost'}:{port}/docs[/]",
+        f"Docs: [bold]http://{host if host != '0.0.0.0' else 'localhost'}:{port}/docs[/]\n"
+        f"Dashboard: [bold]http://{host if host != '0.0.0.0' else 'localhost'}:{port}/admin/[/]",
         title="PPB — Inference Server",
         border_style="blue",
     ))

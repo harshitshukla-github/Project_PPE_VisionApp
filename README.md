@@ -236,6 +236,19 @@ dashboard calls, under `/api/v1/admin`, behind the dashboard login.
 
 After pulling, run `uv run python cli.py db migrate` to reach migration `0003`.
 
+## Admin dashboard
+
+The pages are in [`admin/`](admin/README.md). Build them once and the API server
+serves them at `/admin/`, on the same address as the API:
+
+```bash
+cd admin && npm ci && npm run build
+```
+
+Then open <http://localhost:8000/admin/>. Rebuild after pulling changes to
+`admin/`; there's no need to restart the server. Set `PPB_ADMIN_DIST` if the build
+lives somewhere else. Until there is a build, `/admin/` says how to make one.
+
 ## Project layout
 
 ```

@@ -56,6 +56,26 @@ ever talks to `localhost:5173`. That keeps the session cookie
 - **Over a LAN address** (`http://192.168.x.x:5173`) the cookie also needs
   `PPB_COOKIE_SECURE=false`.
 
+## Serve the build from FastAPI
+
+This is how it runs in production: one address for the pages and the API, and no
+dev server.
+
+```bash
+cd admin
+npm ci
+npm run build
+```
+
+`npm run build` writes to `admin/dist`, which isn't in git. Then, with the backend
+running, open <http://localhost:8000/admin/>. Rebuilding needs no restart. Until
+there is a build, `/admin/` says how to make one, and the API and the mobile app
+work as usual.
+
+Use HTTPS or `localhost`. Over plain `http://192.168.x.x:8000` the browser drops
+the `Secure` session cookie, so sign-in won't stick; `PPB_COOKIE_SECURE=false` gets
+round that for development only.
+
 ## Sample data, when you want it
 
 By default the pages talk to the real server. To work without a backend, or to
