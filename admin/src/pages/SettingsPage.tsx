@@ -50,6 +50,8 @@ export function SettingsPage() {
 
   /** The edits that actually change something, as a merge patch. */
   const changes: Array<{ setting: Setting; to: SettingValue | null }> = [];
+  /** A number outside the range the setting describes: marked as soon as it's typed. */
+  const rangeErrors: Record<string, string> = {};
   let invalid = false;
   for (const s of settings) {
     const edit = edits[s.name];
@@ -59,8 +61,16 @@ export function SettingsPage() {
       continue;
     }
     const value = parse(s, edit.text);
-    if (value === undefined) invalid = true;
-    else if (value !== s.value) changes.push({ setting: s, to: value });
+    if (value === undefined) {
+      invalid = true;
+    } else if (typeof value === "number" && ((s.min !== null && value < s.min) || (s.max !== null && value > s.max))) {
+      // `min` and `max` are rules the server enforces too. `step` is only a hint for the
+      // input, so an off-step value isn't blocked here.
+      rangeErrors[s.name] = `Must be between ${s.min} and ${s.max}.`;
+      invalid = true;
+    } else if (value !== s.value) {
+      changes.push({ setting: s, to: value });
+    }
   }
   const needsConfirm = changes.filter((c) => c.setting.confirm);
 
@@ -148,7 +158,8 @@ export function SettingsPage() {
                       max={s.max ?? undefined}
                       step={s.step ?? undefined}
                       value={text}
-                      aria-invalid={!!fieldErrors[s.name]}
+                      aria-invalid={!!(fieldErrors[s.name] || rangeErrors[s.name])}
+                      aria-describedby={fieldErrors[s.name] || rangeErrors[s.name] ? `${s.name}-error` : undefined}
                       onChange={(e) => edit(s, { kind: "value", text: e.target.value })}
                     />
                   )}
@@ -191,7 +202,11 @@ export function SettingsPage() {
                     Last changed by {s.updated_by}, <Time iso={s.updated_at} />.
                   </p>
                 )}
-                {fieldErrors[s.name] && <span className="field-error">{fieldErrors[s.name]}</span>}
+                {(fieldErrors[s.name] || rangeErrors[s.name]) && (
+                  <span id={`${s.name}-error`} className="field-error" role="alert">
+                    {fieldErrors[s.name] ?? rangeErrors[s.name]}
+                  </span>
+                )}
               </fieldset>
             );
           })}

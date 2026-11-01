@@ -25,6 +25,20 @@ function withMode(requirements: Requirement[], item: string, mode: Mode): Requir
   return [...requirements, { item, mode }];
 }
 
+/**
+ * My edits laid over their version: for each item, if I changed the cell
+ * (compared with `loaded`, the version I started from), my value wins;
+ * otherwise their value stands.
+ */
+function rebase(items: Item[], loaded: Requirement[], mine: Requirement[], theirs: Requirement[]): Requirement[] {
+  let result = theirs;
+  for (const item of items) {
+    const mode = modeOf(mine, item.key);
+    if (mode !== modeOf(loaded, item.key)) result = withMode(result, item.key, mode);
+  }
+  return result;
+}
+
 /** Two lists are the same matrix row if every item has the same mode; order doesn't matter here. */
 function sameRow(a: Requirement[], b: Requirement[]): boolean {
   return a.length === b.length && a.every((r) => modeOf(b, r.item) === r.mode);
@@ -131,13 +145,37 @@ export function MatrixPage({ user }: { user: DashboardUser }) {
     }
   }
 
-  /** Take the other person's version, then either drop my edits or keep them on top. */
+  /**
+   * Take the other person's version, then either drop my edits or put them on
+   * top. "On top" means only the cells *I* changed, compared with the version I
+   * loaded: a cell they changed and I didn't keeps their value. Saving my whole
+   * draft instead would send my old copy of every other cell and quietly undo
+   * their work.
+   */
   function resolve(job: Job, keepMine: boolean) {
     const theirs = rows[job.key]?.conflict;
     if (!theirs) return;
     replaceJob(theirs);
-    if (!keepMine) discard(theirs);
-    patchRow(job.key, keepMine ? { problem: { message: "Showing their version with your edits on top. Save again when you're happy.", tone: "notice" } } : null);
+    if (!keepMine) {
+      discard(theirs);
+      return;
+    }
+    const rebased = rebase(items, job.requirements, drafts[job.key] ?? job.requirements, theirs.requirements);
+    const nothingLeft = sameRow(rebased, theirs.requirements);
+    setDrafts((current) => {
+      const copy = { ...current };
+      if (nothingLeft) delete copy[job.key];
+      else copy[job.key] = rebased;
+      return copy;
+    });
+    patchRow(job.key, {
+      problem: {
+        message: nothingLeft
+          ? "Their version already has your changes, so there's nothing left to save."
+          : "Showing their version with your edits on top. Save again when you're happy.",
+        tone: "notice",
+      },
+    });
   }
 
   const items = data?.items ?? [];

@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { setAdminTransport } from "../api/client";
 import type { MockBackend } from "../mock/backend";
 import { startMockBackend } from "../testing/harness";
 import { SettingsPage } from "./SettingsPage";
@@ -122,17 +123,77 @@ describe("SettingsPage", () => {
     expect(screen.getByLabelText("Gemini min confidence")).toHaveValue(0.75);
   });
 
-  it("is all or nothing: one value out of range saves none, and the setting is marked", async () => {
-    const user = await open();
-    await user.click(screen.getByLabelText("Gemini verify")); // fine on its own
-    await type(user, "Confidence threshold", "0.95"); // outside 0.25–0.8
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
-    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Yes, save" }));
+  describe("a number outside the range the setting describes", () => {
+    it("is marked as soon as it's typed: no confirmation, no request, Save off", async () => {
+      const asked: string[] = [];
+      const real = backend.fetch;
+      setAdminTransport(async (url, init) => {
+        asked.push(`${init?.method ?? "GET"} ${url}`);
+        return real(url, init);
+      });
+      const user = await open();
 
-    expect(await screen.findByText(/Nothing was saved/)).toBeInTheDocument();
-    expect(screen.getByText(/confidence_threshold must be between 0\.25 and 0\.8/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Confidence threshold")).toHaveAttribute("aria-invalid", "true");
-    expect(saved("gemini_verify")).toBeUndefined();
+      await type(user, "Confidence threshold", "0.9"); // the range shown is 0.25 to 0.8
+
+      expect(await screen.findByText("Must be between 0.25 and 0.8.")).toBeInTheDocument();
+      expect(screen.getByLabelText("Confidence threshold")).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(asked.filter((a) => a.startsWith("PATCH"))).toEqual([]);
+    });
+
+    it("also stops a value below the range, and clears the mark when it's fixed", async () => {
+      const user = await open();
+      await type(user, "Confidence threshold", "0.1");
+      expect(await screen.findByText("Must be between 0.25 and 0.8.")).toBeInTheDocument();
+
+      await type(user, "Confidence threshold", "0.5");
+
+      expect(screen.queryByText("Must be between 0.25 and 0.8.")).toBeNull();
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    });
+
+    it("accepts the two ends of the range", async () => {
+      const user = await open();
+      for (const edge of ["0.25", "0.8"]) {
+        await type(user, "Confidence threshold", edge);
+        expect(screen.queryByText(/Must be between/)).toBeNull();
+        expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+      }
+    });
+
+    it("doesn't block a value that is between the ends but off the step: only min and max are rules", async () => {
+      const user = await open();
+
+      await type(user, "Confidence threshold", "0.47"); // step is 0.05
+
+      expect(screen.queryByText(/Must be between/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    });
+
+    it("is still all or nothing when the server refuses: a page that showed an older, wider range", async () => {
+      // The descriptor the page loaded says 0.25–1.0, as if an admin narrowed it after the page loaded.
+      const real = backend.fetch;
+      setAdminTransport(async (url, init) => {
+        const response = await real(url, init);
+        if (url.endsWith("/admin/settings") && (init?.method ?? "GET") === "GET") {
+          const list = await response.json();
+          list.find((s: { name: string }) => s.name === "confidence_threshold").max = 1;
+          return new Response(JSON.stringify(list), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        return response;
+      });
+      const user = await open();
+      await user.click(screen.getByLabelText("Gemini verify")); // fine on its own
+      await type(user, "Confidence threshold", "0.95"); // allowed by the page's range, not by the server's
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Yes, save" }));
+
+      expect(await screen.findByText(/Nothing was saved/)).toBeInTheDocument();
+      expect(screen.getByText(/confidence_threshold must be between 0\.25 and 0\.8/)).toBeInTheDocument();
+      expect(screen.getByLabelText("Confidence threshold")).toHaveAttribute("aria-invalid", "true");
+      expect(saved("gemini_verify")).toBeUndefined(); // the valid change wasn't saved either
+    });
   });
 
   it("can't save a number that has been cleared", async () => {

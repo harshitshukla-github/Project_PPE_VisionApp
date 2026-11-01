@@ -122,6 +122,81 @@ describe("MatrixPage", () => {
     });
   });
 
+  describe("'Keep my edits on top' re-applies only the cells I changed", () => {
+    const grade = (key: string) => welder().requirements.find((r) => r.item === key)?.mode ?? "off";
+
+    /** I change `mine`; meanwhile another admin changes `theirs`; I save and meet the conflict. */
+    async function conflictWith(mine: Array<[string, string]>, theirs: (job: ReturnType<typeof welder>) => void) {
+      const user = await open();
+      for (const [item, mode] of mine) await user.selectOptions(screen.getByLabelText(`Welder: ${item}`), mode);
+      theirs(welder());
+      welder().version += 1;
+      await user.click(screen.getByRole("button", { name: "Save Welder" }));
+      await screen.findByTestId("conflict-welder");
+      return user;
+    }
+    const removeItem = (key: string) => (job: ReturnType<typeof welder>) => {
+      job.requirements = job.requirements.filter((r) => r.item !== key);
+    };
+
+    it("keeps their changes to cells I didn't touch, and mine to the ones I did", async () => {
+      // I only turn Mask on. They turn Goggles and Boots off (two cells I never touched).
+      const user = await conflictWith([["Mask", "required"]], (job) => {
+        removeItem("goggles")(job);
+        removeItem("boots")(job);
+      });
+
+      await user.click(screen.getByRole("button", { name: "Keep my edits on top" }));
+
+      expect(screen.getByLabelText("Welder: Goggles")).toHaveValue("off"); // theirs
+      expect(screen.getByLabelText("Welder: Boots")).toHaveValue("off"); // theirs
+      expect(screen.getByLabelText("Welder: Mask")).toHaveValue("required"); // mine
+      await user.click(screen.getByRole("button", { name: "Save Welder" }));
+      await screen.findByText(/Saved\./);
+      expect(grade("mask")).toBe("required");
+      expect(grade("goggles")).toBe("off"); // their change survived the save
+      expect(grade("boots")).toBe("off");
+    });
+
+    it("lets my value win on a cell we both changed", async () => {
+      const user = await conflictWith([["Gloves", "off"]], (job) => {
+        job.requirements = job.requirements.map((r) => (r.item === "gloves" ? { ...r, mode: "pending" as const } : r));
+      });
+
+      await user.click(screen.getByRole("button", { name: "Keep my edits on top" }));
+      await user.click(screen.getByRole("button", { name: "Save Welder" }));
+
+      await screen.findByText(/Saved\./);
+      expect(grade("gloves")).toBe("off");
+    });
+
+    it("both together: my cell, their other cell, and a cell we both changed", async () => {
+      const user = await conflictWith(
+        [["Mask", "required"], ["Gloves", "off"]],
+        (job) => {
+          removeItem("goggles")(job);
+          job.requirements = job.requirements.map((r) => (r.item === "gloves" ? { ...r, mode: "pending" as const } : r));
+        },
+      );
+
+      await user.click(screen.getByRole("button", { name: "Keep my edits on top" }));
+      await user.click(screen.getByRole("button", { name: "Save Welder" }));
+
+      await screen.findByText(/Saved\./);
+      expect([grade("mask"), grade("goggles"), grade("gloves")]).toEqual(["required", "off", "off"]);
+    });
+
+    it("has nothing left to save when their version already contains my change", async () => {
+      const user = await conflictWith([["Gloves", "off"]], removeItem("gloves")); // they made the same change
+
+      await user.click(screen.getByRole("button", { name: "Keep my edits on top" }));
+
+      expect(screen.getByLabelText("Welder: Gloves")).toHaveValue("off");
+      expect(screen.getByRole("button", { name: "Save Welder" })).toBeDisabled();
+      expect(screen.getByText(/already has your changes/)).toBeInTheDocument();
+    });
+  });
+
   it("is read-only for a supervisor: no selects, no Save", async () => {
     backend = startMockBackend(SUPERVISOR_B);
     await open(SUPERVISOR_B);
