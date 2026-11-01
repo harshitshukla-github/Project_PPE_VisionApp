@@ -74,12 +74,14 @@ describe("on page load (GET /auth/me)", () => {
     expect(screen.queryByTestId("whoami")).toBeNull();
   });
 
-  it("says so when the server can't be reached", async () => {
+  it("says so when the server can't be reached, rather than showing a sign-in form", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
 
     renderApp();
 
     expect(await screen.findByText("Can't reach the server.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
 
@@ -553,5 +555,66 @@ describe("an old server error doesn't linger on the change-password page", () =>
     expect(screen.getByText("Use at least 12 characters.")).toBeInTheDocument();
     expect(screen.queryByText("That isn't your current password.")).toBeNull();
     expect(screen.getByRole("button", { name: "Save new password" })).toBeDisabled();
+  });
+});
+
+describe("when the server is down as the page loads", () => {
+  /** What the dev proxy, or a load balancer, answers when nothing is behind it. */
+  const badGateway = () => new Response("Bad Gateway", { status: 502, statusText: "Bad Gateway" });
+
+  it("says 'try again shortly' in amber, not the raw 'Bad Gateway', and shows no sign-in form", async () => {
+    mockApi({ "GET /api/v1/auth/me": badGateway });
+
+    renderApp();
+
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent("Try again shortly");
+    expect(screen.queryByText(/Bad Gateway/)).toBeNull();
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+  });
+
+  it("says nothing about whether you're still signed in, since nobody knows yet", async () => {
+    mockApi({ "GET /api/v1/auth/me": badGateway });
+
+    renderApp();
+
+    expect(await screen.findByText(/no way to tell yet whether you're still signed in/)).toBeInTheDocument();
+    expect(screen.queryByText("Your session ended. Sign in again.")).toBeNull();
+  });
+
+  it("'Try again' goes straight to the dashboard once the server is back: the session was fine", async () => {
+    let up = false;
+    startMockBackend(ADMIN_SESSION.user);
+    const fetchMock = mockApi({ "GET /api/v1/auth/me": () => (up ? ok(ADMIN_SESSION) : badGateway()) });
+    renderApp();
+    const user = userEvent.setup();
+    await screen.findByRole("button", { name: "Try again" });
+
+    up = true;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByTestId("whoami")).toHaveTextContent("Test Admin · admin");
+    expect(screen.queryByLabelText("Email")).toBeNull(); // never asked to sign in again
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/v1/auth/me")).toHaveLength(2);
+  });
+
+  it("stays on the same screen if the server is still down after 'Try again'", async () => {
+    mockApi({ "GET /api/v1/auth/me": badGateway });
+    renderApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).toBeNull();
+  });
+
+  it("still shows the sign-in form when the server answers that nobody is signed in", async () => {
+    mockApi({ "GET /api/v1/auth/me": () => fail(401, { detail: "Sign in.", code: "not_authenticated" }) });
+
+    renderApp();
+
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 });
