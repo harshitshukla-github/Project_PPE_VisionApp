@@ -30,6 +30,26 @@ describe("MatrixPage", () => {
     expect(screen.getByLabelText("Painter: Boots")).toHaveValue("off");
   });
 
+  it("draws the columns in the order the API gives them: head to toe, not alphabetical", async () => {
+    await open();
+
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent ?? "");
+    // The first column is "Job" and the last is "Row" (the Save buttons); the ones between are items.
+    const items = headers.slice(1, -1).map((text) => text.replace(/(AP50.*|Gemini only)$/, ""));
+    expect(items).toEqual([
+      "Hardhat", "Goggles", "Face shield", "Ear protection", "Mask", "Safety vest", "Harness", "Gloves", "Boots",
+    ]);
+  });
+
+  it("marks Ear protection 'Gemini only', like Face shield and Harness", async () => {
+    await open();
+
+    for (const name of ["Face shield", "Ear protection", "Harness"]) {
+      expect(screen.getByRole("columnheader", { name: new RegExp(`${name}.*Gemini only`) })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("columnheader", { name: /Mask.*AP50/ })).toBeInTheDocument();
+  });
+
   it("keeps Save off until a cell changes, then saves the row with its version and shows the new one", async () => {
     const user = await open();
     const save = screen.getByRole("button", { name: "Save Painter" });
