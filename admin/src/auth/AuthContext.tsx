@@ -17,7 +17,7 @@ import {
   setSessionEndedHandler,
   type DashboardUser,
 } from "../api/client";
-import { problemFrom, type Problem } from "../api/problems";
+import { problemFrom, SessionNotKeptError, type Problem } from "../api/problems";
 
 /**
  * Who is using the dashboard. `loading` lasts only until `GET /auth/me` has
@@ -90,6 +90,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signIn(email: string, password: string) {
     const session = await login(email.trim(), password);
+    // The login answer sets the session cookie, but the browser decides whether to keep it: on plain
+    // http at a LAN address it refuses a `Secure` cookie. Ask who we are once, so that case is told
+    // here, on the sign-in page, instead of as "Your session ended" after the dashboard has opened.
+    // Only a 401 means the cookie didn't come back; a server hiccup doesn't undo a sign-in the server accepted.
+    try {
+      await getSession();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        throw new SessionNotKeptError(window.isSecureContext === false, window.location.origin);
+      }
+    }
     setAuth({ kind: "signedIn", user: session.user });
   }
 

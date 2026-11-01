@@ -53,8 +53,13 @@ ever talks to `localhost:5173`. That keeps the session cookie
 - **Safari** won't keep a `Secure` cookie from plain `http://localhost`. Set
   `PPB_COOKIE_SECURE=false` in `.env` and restart the backend, or use Chrome or
   Firefox.
-- **Over a LAN address** (`http://192.168.x.x:5173`) the cookie also needs
-  `PPB_COOKIE_SECURE=false`.
+- **Over a LAN address** (`http://192.168.x.x:5173` or `:8000/admin/`) the browser
+  drops the `Secure` cookie, because the page isn't HTTPS. The dashboard says so
+  right after you sign in ("You signed in, but your browser didn't keep the
+  session…"), instead of letting you in and then bouncing you out. Use an
+  `https://` address or `http://localhost`. For development only, you can set
+  `PPB_COOKIE_SECURE=false` in `.env` and restart the backend; the dashboard
+  then signs in normally.
 
 ## Sample data, when you want it
 
