@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { updateWorker } from "../api/client";
 import type { MockBackend } from "../mock/backend";
@@ -10,6 +10,19 @@ import { AuditPage } from "./AuditPage";
 let backend: MockBackend;
 beforeEach(() => {
   backend = startMockBackend();
+});
+
+// The date filter means the person's own days, so these tests run in India (UTC+5:30), where a
+// day starts at 18:30 UTC the evening before. The same tests would pass in UTC with or without
+// the fix, so the timezone is checked rather than assumed.
+const ORIGINAL_TZ = process.env.TZ;
+beforeAll(() => {
+  process.env.TZ = "Asia/Kolkata";
+  expect(new Date(2026, 10, 2).getTimezoneOffset()).toBe(-330);
+});
+afterAll(() => {
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
 });
 
 const range = () => screen.getByTestId("range").textContent;
@@ -89,6 +102,28 @@ describe("AuditPage", () => {
     await user.type(screen.getByLabelText("To"), "2026-10-19"); // the first entry is at 12:00 that day
     await user.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(actions()).toEqual(["worker.create"]));
+  });
+
+  it("reads a picked day as the person's own day: 02:04 on 2 November in India is in 2 November", async () => {
+    // 20:34 UTC on 1 November is 02:04 on 2 November in India, and the table shows it as 2 November.
+    backend.state.audit.push({
+      id: 500, at: "2026-11-01T20:34:00Z", actor: "cli", action: "worker.create", target: "worker:LATE-1",
+      site: null, before: null, after: null, ip: null,
+    });
+    const user = await open();
+
+    await user.type(screen.getByLabelText("From"), "2026-11-02");
+    await user.type(screen.getByLabelText("To"), "2026-11-02");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(screen.getByText("worker:LATE-1")).toBeInTheDocument()); // found
+
+    await user.clear(screen.getByLabelText("From"));
+    await user.clear(screen.getByLabelText("To"));
+    await user.type(screen.getByLabelText("From"), "2026-11-01");
+    await user.type(screen.getByLabelText("To"), "2026-11-01");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    await screen.findByText("Nothing in the log matches."); // not found under 1 November
+    expect(screen.queryByText("worker:LATE-1")).toBeNull();
   });
 
   it("says when nothing matches", async () => {

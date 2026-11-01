@@ -53,8 +53,13 @@ ever talks to `localhost:5173`. That keeps the session cookie
 - **Safari** won't keep a `Secure` cookie from plain `http://localhost`. Set
   `PPB_COOKIE_SECURE=false` in `.env` and restart the backend, or use Chrome or
   Firefox.
-- **Over a LAN address** (`http://192.168.x.x:5173`) the cookie also needs
-  `PPB_COOKIE_SECURE=false`.
+- **Over a LAN address** (`http://192.168.x.x:5173` or `:8000/admin/`) the browser
+  drops the `Secure` cookie, because the page isn't HTTPS. The dashboard says so
+  right after you sign in ("You signed in, but your browser didn't keep the
+  session…"), instead of letting you in and then bouncing you out. Use an
+  `https://` address or `http://localhost`. For development only, you can set
+  `PPB_COOKIE_SECURE=false` in `.env` and restart the backend; the dashboard
+  then signs in normally.
 
 ## Sample data, when you want it
 
@@ -100,6 +105,14 @@ npm run build
   `503`) is an amber "try again shortly" notice, never a red error.
 - `src/auth/AuthContext.tsx` holds who is signed in. `GET /auth/me` runs on
   every page load; until it answers, the app shows a spinner, not the login page.
+  If the server doesn't answer at all (down, or a `502`/`503`/`504` from a proxy
+  in front of it), the app says so and offers "Try again" instead of showing a
+  sign-in form: nobody knows yet whether the session is still good.
+- "Change password" in the header opens the same page that is forced on a first
+  sign-in, inside the normal frame, with its own wording and a way back.
+- A picked day in the audit filter means that day where the person is
+  (`src/dates.ts`), because the table shows local times; the API gets the local
+  midnights converted to UTC.
 - Pages are chosen by a tiny hash router (`#/workers`): nothing to configure on
   the server for deep links. `src/pages/registry.tsx` lists them, with who gets
   a link. A page a role can't use isn't opened at all; the server's
