@@ -407,3 +407,151 @@ describe("the admin API: real by default, a stand-in only on request", () => {
     expect(asked).toContain("/api/v1/admin/jobs");
   });
 });
+
+describe("changing your own password later", () => {
+  const SUPERVISOR = {
+    ...ADMIN_SESSION,
+    user: {
+      ...ADMIN_SESSION.user, id: 101, email: "supervisor.b@example.com", display_name: "Site Supervisor B",
+      role: "supervisor" as const, site: "pune_tower_b",
+    },
+  };
+  const NEW = "a-long-new-passphrase";
+
+  function openAs(session: typeof ADMIN_SESSION, passwordAnswer: () => Response = () => noContent()) {
+    startMockBackend(session.user);
+    const fetchMock = mockApi({
+      "GET /api/v1/auth/me": () => ok(session),
+      "POST /api/v1/auth/password": passwordAnswer,
+    });
+    window.location.hash = "";
+    renderApp();
+    return fetchMock;
+  }
+
+  async function openPage(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("link", { name: "Change password" }));
+    await screen.findByRole("heading", { name: "Change your password" });
+  }
+
+  async function fill(user: ReturnType<typeof userEvent.setup>, current: string, next: string, again: string) {
+    await user.type(screen.getByLabelText("Current password"), current);
+    await user.type(screen.getByLabelText("New password"), next);
+    await user.type(screen.getByLabelText("Type the new password again"), again);
+  }
+
+  it.each([
+    ["an admin", ADMIN_SESSION],
+    ["a supervisor", SUPERVISOR],
+  ])("%s has a Change password link in the header", async (_who, session) => {
+    openAs(session);
+
+    expect(await screen.findByRole("link", { name: "Change password" })).toHaveAttribute("href", "#/password");
+  });
+
+  it("opens inside the usual frame with its own wording, and keeps the navigation as the way back", async () => {
+    openAs(ADMIN_SESSION);
+    const user = userEvent.setup();
+
+    await openPage(user);
+
+    expect(screen.queryByText(/only for your first sign-in/)).toBeNull(); // that wording is for the forced change
+    expect(screen.getByText(/You stay signed in here/)).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Pages" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Change password" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getAllByRole("button", { name: "Sign out" })).toHaveLength(1); // the header's; the forced page's own is not shown
+  });
+
+  it("changes the password with the CSRF token, says so, and offers the way back", async () => {
+    const fetchMock = openAs(ADMIN_SESSION);
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "my-old-password-1", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    const done = await screen.findByTestId("password-changed");
+    expect(done).toHaveTextContent("Password changed");
+    expect(done).toHaveTextContent("Anywhere else you were signed in has been signed out");
+    const call = fetchMock.mock.calls.find(([url]) => url === "/api/v1/auth/password")!;
+    expect(JSON.parse(call[1]?.body as string)).toEqual({ current_password: "my-old-password-1", new_password: NEW });
+    expect((call[1]?.headers as Record<string, string>)["X-CSRF-Token"]).toBe("csrf-1");
+
+    await user.click(within(done).getByRole("link", { name: "Back to the dashboard" }));
+    expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+    expect(screen.getByTestId("whoami")).toBeInTheDocument(); // still signed in
+  });
+
+  it("can be cancelled", async () => {
+    openAs(ADMIN_SESSION);
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await user.click(screen.getByRole("link", { name: "Cancel" }));
+
+    expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+  });
+
+  it("says a wrong current password plainly, and stays on the page", async () => {
+    openAs(ADMIN_SESSION, () => fail(401, { detail: "Wrong.", code: "invalid_credentials" }));
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "not-my-password", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    expect(await screen.findByText("That isn't your current password.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+  });
+
+  it("shows the server's reason for a weak new password", async () => {
+    openAs(ADMIN_SESSION, () => fail(422, { detail: "A password can't be your email address.", code: "weak_password" }));
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "my-old-password-1", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    expect(await screen.findByText("A password can't be your email address.")).toBeInTheDocument();
+  });
+});
+
+describe("an old server error doesn't linger on the change-password page", () => {
+  const NEW = "a-long-new-passphrase";
+
+  async function afterWrongCurrentPassword() {
+    startMockBackend(MUST_CHANGE_SESSION.user);
+    mockApi({
+      "GET /api/v1/auth/me": () => ok(MUST_CHANGE_SESSION),
+      "POST /api/v1/auth/password": () => fail(401, { detail: "Wrong.", code: "invalid_credentials" }),
+    });
+    renderApp();
+    await screen.findByText("Choose a new password");
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Current password"), "not-the-temp-one");
+    await user.type(screen.getByLabelText("New password"), NEW);
+    await user.type(screen.getByLabelText("Type the new password again"), NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+    await screen.findByText("That isn't your current password.");
+    return user;
+  }
+
+  it("goes when the person corrects the field it was about", async () => {
+    const user = await afterWrongCurrentPassword();
+
+    await user.type(screen.getByLabelText("Current password"), "x");
+
+    expect(screen.queryByText("That isn't your current password.")).toBeNull();
+  });
+
+  it("goes when the person edits any field, even though Save is off: no old error beside a new message", async () => {
+    const user = await afterWrongCurrentPassword();
+
+    await user.clear(screen.getByLabelText("New password"));
+    await user.type(screen.getByLabelText("New password"), "short");
+
+    expect(screen.getByText("Use at least 12 characters.")).toBeInTheDocument();
+    expect(screen.queryByText("That isn't your current password.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save new password" })).toBeDisabled();
+  });
+});

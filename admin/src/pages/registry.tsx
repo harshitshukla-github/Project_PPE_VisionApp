@@ -33,3 +33,6 @@ export const PAGES: PageDef[] = [
 
 /** Where "/" goes: the one page everybody can see. */
 export const DEFAULT_PATH = "/matrix";
+
+/** The signed-in user changing their own password: opened from the header, not listed in the navigation. */
+export const PASSWORD_PATH = "/password";

@@ -3,7 +3,7 @@ import { useAuth } from "./auth/AuthContext";
 import { AppShell } from "./components/AppShell";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { LoginPage } from "./pages/LoginPage";
-import { DEFAULT_PATH, PAGES } from "./pages/registry";
+import { DEFAULT_PATH, PAGES, PASSWORD_PATH } from "./pages/registry";
 import { useHashPath } from "./router";
 
 /**
@@ -35,7 +35,9 @@ function Dashboard({ user }: { user: DashboardUser }) {
 
   return (
     <AppShell user={user} path={path}>
-      {!page ? (
+      {path === PASSWORD_PATH ? (
+        <ChangePasswordPage voluntary />
+      ) : !page ? (
         <section className="page">
           <h1>Page not found</h1>
           <p>
