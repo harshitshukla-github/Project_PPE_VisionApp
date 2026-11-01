@@ -202,6 +202,9 @@ the dashboard can't add or remove them.
 ]
 ```
 
+- Items come in a fixed order, head to toe: hardhat, goggles, face shield,
+  ear protection, mask, safety vest, harness, gloves, boots. Show them in the
+  order given (the matrix's columns, the Jobs page's checkboxes).
 - `detectable` is whether the detector was trained on the item. A required
   item that isn't detectable is judged by Gemini alone.
 - `detector_ap50` is the loaded model's accuracy on the item, from the
