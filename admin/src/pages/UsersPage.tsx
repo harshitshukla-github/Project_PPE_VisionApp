@@ -182,7 +182,7 @@ export function UsersPage({ user, now = () => new Date() }: { user: DashboardUse
                     className="secondary"
                     aria-label={`Reset password for ${u.email}`}
                     disabled={busy || isMe(u)}
-                    title={isMe(u) ? "Use Change password to reset your own." : undefined}
+                    title={isMe(u) ? "Use “Change password” at the top of the page to change your own." : undefined}
                     onClick={() =>
                       void run(async () => {
                         const { temporary_password } = await resetUserPassword(u.id);

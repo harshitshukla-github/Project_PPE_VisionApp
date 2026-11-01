@@ -74,12 +74,14 @@ describe("on page load (GET /auth/me)", () => {
     expect(screen.queryByTestId("whoami")).toBeNull();
   });
 
-  it("says so when the server can't be reached", async () => {
+  it("says so when the server can't be reached, rather than showing a sign-in form", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
 
     renderApp();
 
     expect(await screen.findByText("Can't reach the server.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
 
@@ -405,5 +407,214 @@ describe("the admin API: real by default, a stand-in only on request", () => {
     const asked = fetchMock.mock.calls.map(([url]) => url);
     expect(asked).toContain("/api/v1/admin/items");
     expect(asked).toContain("/api/v1/admin/jobs");
+  });
+});
+
+describe("changing your own password later", () => {
+  const SUPERVISOR = {
+    ...ADMIN_SESSION,
+    user: {
+      ...ADMIN_SESSION.user, id: 101, email: "supervisor.b@example.com", display_name: "Site Supervisor B",
+      role: "supervisor" as const, site: "pune_tower_b",
+    },
+  };
+  const NEW = "a-long-new-passphrase";
+
+  function openAs(session: typeof ADMIN_SESSION, passwordAnswer: () => Response = () => noContent()) {
+    startMockBackend(session.user);
+    const fetchMock = mockApi({
+      "GET /api/v1/auth/me": () => ok(session),
+      "POST /api/v1/auth/password": passwordAnswer,
+    });
+    window.location.hash = "";
+    renderApp();
+    return fetchMock;
+  }
+
+  async function openPage(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("link", { name: "Change password" }));
+    await screen.findByRole("heading", { name: "Change your password" });
+  }
+
+  async function fill(user: ReturnType<typeof userEvent.setup>, current: string, next: string, again: string) {
+    await user.type(screen.getByLabelText("Current password"), current);
+    await user.type(screen.getByLabelText("New password"), next);
+    await user.type(screen.getByLabelText("Type the new password again"), again);
+  }
+
+  it.each([
+    ["an admin", ADMIN_SESSION],
+    ["a supervisor", SUPERVISOR],
+  ])("%s has a Change password link in the header", async (_who, session) => {
+    openAs(session);
+
+    expect(await screen.findByRole("link", { name: "Change password" })).toHaveAttribute("href", "#/password");
+  });
+
+  it("opens inside the usual frame with its own wording, and keeps the navigation as the way back", async () => {
+    openAs(ADMIN_SESSION);
+    const user = userEvent.setup();
+
+    await openPage(user);
+
+    expect(screen.queryByText(/only for your first sign-in/)).toBeNull(); // that wording is for the forced change
+    expect(screen.getByText(/You stay signed in here/)).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Pages" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Change password" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getAllByRole("button", { name: "Sign out" })).toHaveLength(1); // the header's; the forced page's own is not shown
+  });
+
+  it("changes the password with the CSRF token, says so, and offers the way back", async () => {
+    const fetchMock = openAs(ADMIN_SESSION);
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "my-old-password-1", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    const done = await screen.findByTestId("password-changed");
+    expect(done).toHaveTextContent("Password changed");
+    expect(done).toHaveTextContent("Anywhere else you were signed in has been signed out");
+    const call = fetchMock.mock.calls.find(([url]) => url === "/api/v1/auth/password")!;
+    expect(JSON.parse(call[1]?.body as string)).toEqual({ current_password: "my-old-password-1", new_password: NEW });
+    expect((call[1]?.headers as Record<string, string>)["X-CSRF-Token"]).toBe("csrf-1");
+
+    await user.click(within(done).getByRole("link", { name: "Back to the dashboard" }));
+    expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+    expect(screen.getByTestId("whoami")).toBeInTheDocument(); // still signed in
+  });
+
+  it("can be cancelled", async () => {
+    openAs(ADMIN_SESSION);
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await user.click(screen.getByRole("link", { name: "Cancel" }));
+
+    expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+  });
+
+  it("says a wrong current password plainly, and stays on the page", async () => {
+    openAs(ADMIN_SESSION, () => fail(401, { detail: "Wrong.", code: "invalid_credentials" }));
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "not-my-password", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    expect(await screen.findByText("That isn't your current password.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+  });
+
+  it("shows the server's reason for a weak new password", async () => {
+    openAs(ADMIN_SESSION, () => fail(422, { detail: "A password can't be your email address.", code: "weak_password" }));
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "my-old-password-1", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    expect(await screen.findByText("A password can't be your email address.")).toBeInTheDocument();
+  });
+});
+
+describe("an old server error doesn't linger on the change-password page", () => {
+  const NEW = "a-long-new-passphrase";
+
+  async function afterWrongCurrentPassword() {
+    startMockBackend(MUST_CHANGE_SESSION.user);
+    mockApi({
+      "GET /api/v1/auth/me": () => ok(MUST_CHANGE_SESSION),
+      "POST /api/v1/auth/password": () => fail(401, { detail: "Wrong.", code: "invalid_credentials" }),
+    });
+    renderApp();
+    await screen.findByText("Choose a new password");
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Current password"), "not-the-temp-one");
+    await user.type(screen.getByLabelText("New password"), NEW);
+    await user.type(screen.getByLabelText("Type the new password again"), NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+    await screen.findByText("That isn't your current password.");
+    return user;
+  }
+
+  it("goes when the person corrects the field it was about", async () => {
+    const user = await afterWrongCurrentPassword();
+
+    await user.type(screen.getByLabelText("Current password"), "x");
+
+    expect(screen.queryByText("That isn't your current password.")).toBeNull();
+  });
+
+  it("goes when the person edits any field, even though Save is off: no old error beside a new message", async () => {
+    const user = await afterWrongCurrentPassword();
+
+    await user.clear(screen.getByLabelText("New password"));
+    await user.type(screen.getByLabelText("New password"), "short");
+
+    expect(screen.getByText("Use at least 12 characters.")).toBeInTheDocument();
+    expect(screen.queryByText("That isn't your current password.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save new password" })).toBeDisabled();
+  });
+});
+
+describe("when the server is down as the page loads", () => {
+  /** What the dev proxy, or a load balancer, answers when nothing is behind it. */
+  const badGateway = () => new Response("Bad Gateway", { status: 502, statusText: "Bad Gateway" });
+
+  it("says 'try again shortly' in amber, not the raw 'Bad Gateway', and shows no sign-in form", async () => {
+    mockApi({ "GET /api/v1/auth/me": badGateway });
+
+    renderApp();
+
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent("Try again shortly");
+    expect(screen.queryByText(/Bad Gateway/)).toBeNull();
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+  });
+
+  it("says nothing about whether you're still signed in, since nobody knows yet", async () => {
+    mockApi({ "GET /api/v1/auth/me": badGateway });
+
+    renderApp();
+
+    expect(await screen.findByText(/no way to tell yet whether you're still signed in/)).toBeInTheDocument();
+    expect(screen.queryByText("Your session ended. Sign in again.")).toBeNull();
+  });
+
+  it("'Try again' goes straight to the dashboard once the server is back: the session was fine", async () => {
+    let up = false;
+    startMockBackend(ADMIN_SESSION.user);
+    const fetchMock = mockApi({ "GET /api/v1/auth/me": () => (up ? ok(ADMIN_SESSION) : badGateway()) });
+    renderApp();
+    const user = userEvent.setup();
+    await screen.findByRole("button", { name: "Try again" });
+
+    up = true;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByTestId("whoami")).toHaveTextContent("Test Admin · admin");
+    expect(screen.queryByLabelText("Email")).toBeNull(); // never asked to sign in again
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/v1/auth/me")).toHaveLength(2);
+  });
+
+  it("stays on the same screen if the server is still down after 'Try again'", async () => {
+    mockApi({ "GET /api/v1/auth/me": badGateway });
+    renderApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).toBeNull();
+  });
+
+  it("still shows the sign-in form when the server answers that nobody is signed in", async () => {
+    mockApi({ "GET /api/v1/auth/me": () => fail(401, { detail: "Sign in.", code: "not_authenticated" }) });
+
+    renderApp();
+
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 });

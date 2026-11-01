@@ -100,6 +100,14 @@ npm run build
   `503`) is an amber "try again shortly" notice, never a red error.
 - `src/auth/AuthContext.tsx` holds who is signed in. `GET /auth/me` runs on
   every page load; until it answers, the app shows a spinner, not the login page.
+  If the server doesn't answer at all (down, or a `502`/`503`/`504` from a proxy
+  in front of it), the app says so and offers "Try again" instead of showing a
+  sign-in form: nobody knows yet whether the session is still good.
+- "Change password" in the header opens the same page that is forced on a first
+  sign-in, inside the normal frame, with its own wording and a way back.
+- A picked day in the audit filter means that day where the person is
+  (`src/dates.ts`), because the table shows local times; the API gets the local
+  midnights converted to UTC.
 - Pages are chosen by a tiny hash router (`#/workers`): nothing to configure on
   the server for deep links. `src/pages/registry.tsx` lists them, with who gets
   a link. A page a role can't use isn't opened at all; the server's

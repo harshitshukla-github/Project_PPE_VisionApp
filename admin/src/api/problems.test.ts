@@ -57,6 +57,15 @@ describe("problemFrom (auth-api §3, by `code`)", () => {
     expect(problem.message).toContain("Try again shortly");
   });
 
+  it.each([
+    [502, "Bad Gateway"],
+    [504, "Gateway Timeout"],
+  ])("a %i from whatever sits in front of the server is the same notice, not the raw '%s'", (status, text) => {
+    const problem = problemFrom(new ApiError(status, text), "x");
+
+    expect(problem).toEqual({ message: "The server can't answer right now. Try again shortly.", tone: "notice" });
+  });
+
   it("an unreachable server keeps its own message, in red", () => {
     const err = new ApiError(0, "Can't reach the server.");
     expect(problemFrom(err, "x")).toEqual({ message: "Can't reach the server.", tone: "error" });
