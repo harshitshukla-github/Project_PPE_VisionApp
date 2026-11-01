@@ -66,6 +66,31 @@ describe("who may ask (§1, §2)", () => {
 });
 
 describe("items and jobs (§4, §5)", () => {
+  it("lists the items head to toe, as the real backend does (docs/admin-api.md §4)", async () => {
+    const items = (await call("GET", "/items")).body;
+
+    expect(items.map((i: { key: string }) => i.key)).toEqual([
+      "hardhat", "goggles", "face_shield", "ear_protection", "mask", "safety_vest", "harness", "gloves", "boots",
+    ]);
+  });
+
+  it("has the same items Gemini-only as the real catalogue: Face shield, Ear protection and Harness", async () => {
+    const items = (await call("GET", "/items")).body;
+
+    const geminiOnly = items.filter((i: { detectable: boolean }) => !i.detectable).map((i: { key: string }) => i.key);
+    expect(geminiOnly).toEqual(["face_shield", "ear_protection", "harness"]);
+    for (const item of items) expect(item.detector_ap50 === null).toBe(!item.detectable); // an AP50 only where there is a detector
+  });
+
+  it("warns when Ear protection is made required, since only Gemini can judge it", async () => {
+    const res = await call("PUT", "/jobs/painter/requirements", {
+      version: 2,
+      requirements: [{ item: "safety_vest", mode: "required" }, { item: "ear_protection", mode: "required" }],
+    });
+
+    expect(res.body.warnings).toEqual([expect.objectContaining({ code: "gemini_only_item", item: "ear_protection" })]);
+  });
+
   it("lists items with detectable and detector_ap50 (null when untrained)", async () => {
     const items = (await call("GET", "/items")).body;
     expect(items.find((i: { key: string }) => i.key === "hardhat")).toMatchObject({ detectable: true, detector_ap50: 0.909 });

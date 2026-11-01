@@ -41,16 +41,19 @@ export function seedState(now: Date = new Date()): MockState {
     { key: "old_depot", display_name: "Old Depot", is_active: false, created_at: iso(90) },
   ];
 
+  // The real catalogue (`ITEMS` in src/db/matrix.py, docs/admin-api.md §4): the same items, in
+  // the same head-to-toe order, with the same ones the detector can't see (Face shield, Ear
+  // protection and Harness are Gemini-only, so no AP50). Only the AP50 figures are made up.
   const items: Item[] = [
     { key: "hardhat", display_name: "Hardhat", detectable: true, detector_ap50: 0.909 },
-    { key: "safety_vest", display_name: "Safety vest", detectable: true, detector_ap50: 0.874 },
     { key: "goggles", display_name: "Goggles", detectable: true, detector_ap50: 0.713 },
+    { key: "face_shield", display_name: "Face shield", detectable: false, detector_ap50: null },
+    { key: "ear_protection", display_name: "Ear protection", detectable: false, detector_ap50: null },
     { key: "mask", display_name: "Mask", detectable: true, detector_ap50: 0.781 },
+    { key: "safety_vest", display_name: "Safety vest", detectable: true, detector_ap50: 0.874 },
+    { key: "harness", display_name: "Harness", detectable: false, detector_ap50: null },
     { key: "gloves", display_name: "Gloves", detectable: true, detector_ap50: 0.652 },
     { key: "boots", display_name: "Boots", detectable: true, detector_ap50: 0.598 },
-    { key: "ear_protection", display_name: "Ear protection", detectable: true, detector_ap50: 0.544 },
-    { key: "face_shield", display_name: "Face shield", detectable: false, detector_ap50: null },
-    { key: "harness", display_name: "Harness", detectable: false, detector_ap50: null },
   ];
 
   const jobRows: Array<[string, string, number, Requirement[]]> = [
