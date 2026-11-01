@@ -21,6 +21,7 @@ from sqlalchemy.exc import OperationalError
 
 from src.api.admin_routes import router as admin_router
 from src.api.auth_routes import router as auth_router
+from src.api.dashboard import MOUNT_PATH, NOT_BUILT, DashboardFiles
 from src.api.deps import init_detector
 from src.api.errors import ApiError, api_error_handler
 from src.api.middleware import add_middleware
@@ -32,6 +33,8 @@ from src.settings import settings
 # Read by the lifespan hook; set by cli.py serve before uvicorn starts.
 MODEL_ENV_VAR = "PPB_SERVE_MODEL"
 DEVICE_ENV_VAR = "PPB_SERVE_DEVICE"
+
+dashboard_files = DashboardFiles(settings.ppb_admin_dist)
 
 
 @asynccontextmanager
@@ -53,6 +56,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "instead, remove DATABASE_URL from .env."
         ) from exc
     logger.info(f"Job matrix: {len(jobs)} jobs, read from {matrix_source()}")
+
+    if dashboard_files.is_built:
+        logger.info(f"Dashboard: serving {settings.ppb_admin_dist} at {MOUNT_PATH}/")
+    else:
+        logger.warning(NOT_BUILT.strip())
 
     if settings.ppb_debug_dump_uploads:
         logger.warning(
@@ -76,5 +84,6 @@ add_middleware(app)
 app.include_router(router)
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.mount(MOUNT_PATH, dashboard_files, name="dashboard")
 app.add_exception_handler(ApiError, api_error_handler)  # AuthError included
 app.add_exception_handler(OperationalError, database_unavailable_handler)

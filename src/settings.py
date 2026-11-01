@@ -104,5 +104,8 @@ class Settings(BaseSettings):
     ppb_user_idle_minutes: float = Field(120.0, alias="PPB_USER_IDLE_MINUTES")
     ppb_worker_session_hours: float = Field(12.0, alias="PPB_WORKER_SESSION_HOURS")
 
+    # Where `npm run build` writes the admin dashboard, served at /admin.
+    ppb_admin_dist: Path = Field(Path("admin/dist"), alias="PPB_ADMIN_DIST")
+
 
 settings = Settings()
