@@ -13,6 +13,28 @@ export interface Problem {
   tone: "error" | "notice";
 }
 
+/**
+ * The server accepted the sign-in, but the very next request wasn't signed in:
+ * the browser didn't keep the session cookie. On a page that isn't a secure
+ * context (plain http at an address other than localhost) that is the
+ * browser refusing the cookie's `Secure` flag, which is by design; elsewhere
+ * it usually means cookies are blocked. It is not an expired session, and the
+ * person should hear the difference.
+ */
+export class SessionNotKeptError extends Error {
+  /** True when the page is not a secure context: the usual cause on a LAN address. */
+  readonly insecure: boolean;
+  /** The page's own address, such as `http://192.168.29.210:8000`. */
+  readonly address: string;
+
+  constructor(insecure: boolean, address: string) {
+    super("The browser didn't keep the session cookie.");
+    this.name = "SessionNotKeptError";
+    this.insecure = insecure;
+    this.address = address;
+  }
+}
+
 /** "14 minutes", "1 minute", "40 seconds" — rounded up so it never says "0 minutes". */
 export function formatWait(seconds: number): string {
   if (seconds < 60) {
@@ -24,6 +46,17 @@ export function formatWait(seconds: number): string {
 }
 
 export function problemFrom(err: unknown, fallback: string): Problem {
+  if (err instanceof SessionNotKeptError) {
+    return {
+      message: err.insecure
+        ? `You signed in, but your browser didn't keep the session. ${err.address} isn't a secure (HTTPS) address, ` +
+          "and browsers drop the sign-in cookie on such pages. Open the dashboard at an https:// address, " +
+          "or at http://localhost."
+        : "You signed in, but your browser didn't keep the session. Check that it allows cookies for this site, " +
+          "then sign in again.",
+      tone: "error",
+    };
+  }
   if (!(err instanceof ApiError)) return { message: fallback, tone: "error" };
 
   // 502 and 504 come from whatever sits in front of the server (the dev proxy, a load balancer)

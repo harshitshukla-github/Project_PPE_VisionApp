@@ -101,9 +101,15 @@ describe("login page", () => {
   });
 
   it("signs in, sends the trimmed email, and shows the dashboard", async () => {
+    // Like a real server: nobody is signed in until the password is accepted, and the browser then
+    // keeps the session cookie, so asking who is signed in afterwards gets an answer.
+    let loggedIn = false;
     const fetchMock = mockApi({
-      "GET /api/v1/auth/me": NOT_SIGNED_IN,
-      "POST /api/v1/auth/login": () => ok(ADMIN_SESSION),
+      "GET /api/v1/auth/me": () => (loggedIn ? ok(ADMIN_SESSION) : NOT_SIGNED_IN()),
+      "POST /api/v1/auth/login": () => {
+        loggedIn = true;
+        return ok(ADMIN_SESSION);
+      },
     });
     renderApp();
 
@@ -115,6 +121,8 @@ describe("login page", () => {
       email: "admin@example.com",
       password: "correct horse battery staple",
     });
+    // The page-load check, then one more right after the sign-in, to see the session was kept.
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/v1/auth/me")).toHaveLength(2);
   });
 
   it("401 invalid_credentials: red message, and the password field is cleared", async () => {
@@ -616,5 +624,110 @@ describe("when the server is down as the page loads", () => {
 
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+});
+
+describe("when the browser doesn't keep the sign-in cookie (item 5: plain http on a LAN address)", () => {
+  /** `isSecureContext` is true on https and on localhost, false on plain http at any other address. */
+  function pageIsSecure(secure: boolean) {
+    Object.defineProperty(window, "isSecureContext", { value: secure, configurable: true });
+  }
+  afterEach(() => {
+    delete (window as unknown as { isSecureContext?: boolean }).isSecureContext;
+  });
+
+  /**
+   * A server where nobody is signed in until the password is accepted. `cookieKept` is what the
+   * browser does with the session cookie that the login sets: keeps it (so the next call is
+   * signed in) or drops it (so the next call is a 401, the failure this item is about).
+   */
+  function serverWith(options: { cookieKept: boolean; meAfterLogin?: () => Response }) {
+    let loggedIn = false;
+    return mockApi({
+      "GET /api/v1/auth/me": () => {
+        if (!loggedIn) return NOT_SIGNED_IN();
+        if (options.meAfterLogin) return options.meAfterLogin();
+        return options.cookieKept ? ok(ADMIN_SESSION) : NOT_SIGNED_IN();
+      },
+      "POST /api/v1/auth/login": () => {
+        loggedIn = true;
+        return ok(ADMIN_SESSION);
+      },
+    });
+  }
+
+  it("on plain http: says the address isn't HTTPS, stays on the sign-in page, and never shows the dashboard", async () => {
+    pageIsSecure(false);
+    serverWith({ cookieKept: false });
+    renderApp();
+
+    await signInWith("admin@example.com", "correct horse battery staple");
+
+    const alert = await screen.findByTestId("problem-error");
+    expect(alert).toHaveTextContent("You signed in, but your browser didn't keep the session");
+    expect(alert).toHaveTextContent(`${window.location.origin} isn't a secure (HTTPS) address`); // names the page's own address
+    expect(alert).toHaveTextContent("http://localhost");
+    expect(screen.queryByText("Your session ended. Sign in again.")).toBeNull();
+    expect(screen.getByLabelText("Email")).toBeInTheDocument(); // still the sign-in page
+    expect(screen.queryByTestId("whoami")).toBeNull(); // the dashboard never flashed up
+  });
+
+  it("on a secure page where the cookie still isn't kept: says to check cookies, not the address", async () => {
+    pageIsSecure(true);
+    serverWith({ cookieKept: false });
+    renderApp();
+
+    await signInWith("admin@example.com", "correct horse battery staple");
+
+    const alert = await screen.findByTestId("problem-error");
+    expect(alert).toHaveTextContent("allows cookies");
+    expect(alert).not.toHaveTextContent("isn't a secure");
+  });
+
+  it("signs in normally on plain http when the cookie IS kept (PPB_COOKIE_SECURE=false for development)", async () => {
+    pageIsSecure(false);
+    serverWith({ cookieKept: true });
+    renderApp();
+
+    await signInWith("admin@example.com", "correct horse battery staple");
+
+    expect(await screen.findByTestId("whoami")).toHaveTextContent("Test Admin · admin");
+    expect(screen.queryByTestId("problem-error")).toBeNull();
+  });
+
+  it("doesn't turn a passing server hiccup right after sign-in into this message", async () => {
+    pageIsSecure(false);
+    serverWith({ cookieKept: true, meAfterLogin: () => new Response("Bad Gateway", { status: 502 }) });
+    renderApp();
+
+    await signInWith("admin@example.com", "correct horse battery staple");
+
+    expect(await screen.findByTestId("whoami")).toBeInTheDocument(); // the sign-in itself was accepted
+    expect(screen.queryByText(/didn't keep the session/)).toBeNull();
+  });
+
+  it("an ordinary expired session on the same plain-http page still says 'Your session ended'", async () => {
+    pageIsSecure(false);
+    startMockBackend(ADMIN_SESSION.user);
+    mockApi({ "GET /api/v1/auth/me": () => ok(ADMIN_SESSION) }); // already signed in when the page opens
+    setAdminTransport(async () => fail(401, { detail: "Sign in.", code: "not_authenticated" })); // then the session goes
+    renderApp();
+
+    expect(await screen.findByText("Your session ended. Sign in again.")).toBeInTheDocument();
+    expect(screen.queryByText(/didn't keep the session/)).toBeNull();
+  });
+
+  it("a wrong password doesn't ask the server who is signed in (no extra request, no cookie message)", async () => {
+    pageIsSecure(false);
+    const fetchMock = mockApi({
+      "GET /api/v1/auth/me": NOT_SIGNED_IN,
+      "POST /api/v1/auth/login": () => fail(401, { detail: "Wrong.", code: "invalid_credentials" }),
+    });
+    renderApp();
+
+    await signInWith("admin@example.com", "wrong password here");
+
+    expect(await screen.findByText("Wrong email or password.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/v1/auth/me")).toHaveLength(1); // only the page-load one
   });
 });

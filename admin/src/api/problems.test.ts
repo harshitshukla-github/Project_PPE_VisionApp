@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "./client";
-import { formatWait, problemFrom } from "./problems";
+import { formatWait, problemFrom, SessionNotKeptError } from "./problems";
 
 describe("formatWait", () => {
   it.each([
@@ -69,6 +69,27 @@ describe("problemFrom (auth-api §3, by `code`)", () => {
   it("an unreachable server keeps its own message, in red", () => {
     const err = new ApiError(0, "Can't reach the server.");
     expect(problemFrom(err, "x")).toEqual({ message: "Can't reach the server.", tone: "error" });
+  });
+
+  describe("a sign-in the browser didn't keep", () => {
+    it("on a page that isn't HTTPS: names the address and says to use HTTPS or localhost", () => {
+      const problem = problemFrom(new SessionNotKeptError(true, "http://192.168.29.210:8000"), "x");
+
+      expect(problem.tone).toBe("error");
+      expect(problem.message).toContain("You signed in, but your browser didn't keep the session");
+      expect(problem.message).toContain("http://192.168.29.210:8000 isn't a secure (HTTPS) address");
+      expect(problem.message).toContain("https://");
+      expect(problem.message).toContain("http://localhost");
+      expect(problem.message).not.toContain("session ended"); // not the ordinary expiry
+    });
+
+    it("on a secure page: says to check cookies, and doesn't blame the address", () => {
+      const problem = problemFrom(new SessionNotKeptError(false, "https://dashboard.example.com"), "x");
+
+      expect(problem.message).toContain("didn't keep the session");
+      expect(problem.message).toContain("allows cookies");
+      expect(problem.message).not.toContain("isn't a secure");
+    });
   });
 
   it("uses the fallback for errors that aren't ApiErrors", () => {
