@@ -53,12 +53,12 @@ from rich.panel import Panel
 from rich.table import Table
 
 from src.inference.schemas import Detection
+from src.paths import MODELS_DIR
 from src.settings import settings
 
 if TYPE_CHECKING:
     import numpy as np
 
-MODELS_DIR = Path("models")
 PROBE_OUTPUT_DIR = Path("runs") / "probe"
 
 #: Confidence floor for the probe. Low enough to surface everything the model

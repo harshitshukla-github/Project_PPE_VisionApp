@@ -33,10 +33,9 @@ os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from src.paths import MODELS_DIR  # where trained weights live (written by src/training/trainer.py)
 from src.settings import settings
 
-# Where trained weights live (written by src/training/trainer.py)
-MODELS_DIR = Path("models")
 # Where benchmark artifacts (JSON, plots, report) are written
 BENCHMARK_DIR = Path("runs") / "benchmark"
 

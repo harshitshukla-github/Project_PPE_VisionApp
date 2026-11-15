@@ -24,9 +24,9 @@ from pathlib import Path
 
 from loguru import logger
 
+from src.paths import MODELS_DIR
 from src.settings import settings
 
-MODELS_DIR = Path("models")
 EXPORTS_DIR = MODELS_DIR / "exports"
 
 # Formats forwarded to ultralytics .export(). Values are the file suffix

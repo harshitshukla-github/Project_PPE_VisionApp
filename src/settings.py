@@ -7,15 +7,21 @@ pydantic-settings. Import ``settings`` from here everywhere.
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from src.paths import PROJECT_ROOT, from_project_root
 
 
 class Settings(BaseSettings):
-    """Application-wide settings loaded from .env."""
+    """Application-wide settings loaded from the project's .env.
+
+    The file is the project's own, not one in the folder a command was started
+    from, and every path setting that is relative counts from the project root.
+    """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -107,6 +113,15 @@ class Settings(BaseSettings):
     # Where `npm run build` writes the admin dashboard, served at /admin. A
     # relative path is from the project root, wherever the server was started.
     ppb_admin_dist: Path = Field(Path("admin/dist"), alias="PPB_ADMIN_DIST")
+
+    @model_validator(mode="after")
+    def _paths_from_project_root(self) -> "Settings":
+        """Every path setting, present or future, counts from the project root."""
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if isinstance(value, Path):
+                setattr(self, name, from_project_root(value))
+        return self
 
 
 settings = Settings()

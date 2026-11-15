@@ -17,12 +17,12 @@ from starlette.responses import PlainTextResponse, Response
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-MOUNT_PATH = "/admin"
+# A relative PPB_ADMIN_DIST is from the project root, not from wherever the
+# server was started: under a service manager or a Docker WORKDIR the two
+# differ, and the dashboard would say it hasn't been built when it has.
+from src.paths import PROJECT_ROOT
 
-# A relative PPB_ADMIN_DIST is from here, not from wherever the server was
-# started: under a service manager or a Docker WORKDIR the two differ, and the
-# dashboard would say it hasn't been built when it has.
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+MOUNT_PATH = "/admin"
 
 NOT_BUILT = (
     "The admin dashboard hasn't been built. Run this, then reload the page:\n\n"

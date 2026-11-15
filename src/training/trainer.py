@@ -56,13 +56,10 @@ os.environ.setdefault("MLFLOW_TRACKING_URI", "sqlite:///runs/mlflow.db")
 
 from loguru import logger
 
+from src.paths import MODELS_DIR  # gitignored — stores the best weights per run
 from src.settings import settings
 from src.training.callbacks import build_loguru_callbacks, build_mlflow_callbacks
 from src.training.hyperparams import TrainingConfig, config_path_for, load_training_config
-
-# Models directory (gitignored) — stores the best weights per run
-MODELS_DIR = Path("models")
-
 
 # ---------------------------------------------------------------------------
 # Pre-flight checks
