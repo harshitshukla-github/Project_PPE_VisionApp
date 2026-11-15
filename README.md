@@ -142,6 +142,20 @@ uv run python cli.py db setup             # create the admin system's database
 uv run python cli.py db status            # check .env can connect
 ```
 
+### Starting from another folder
+
+`.env`, `models/`, `configs/` and every relative path set in `.env` are found
+from the project folder, not from the folder a command is started in. A service
+manager or Docker can therefore start the server from anywhere:
+
+```bash
+/path/to/Project_PPE_VisionApp/.venv/bin/python /path/to/Project_PPE_VisionApp/cli.py serve --model yolo11l
+```
+
+The training, benchmark and data commands are still meant to be run from the
+project folder: they write `runs/` where they are started, and
+`configs/data.yaml` names the dataset by a relative path.
+
 ## Database (admin system)
 
 The admin dashboard stores its data in PostgreSQL (tested on 18). On each

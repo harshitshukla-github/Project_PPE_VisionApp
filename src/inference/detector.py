@@ -29,12 +29,11 @@ os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 from loguru import logger
 
 from src.inference.schemas import Detection
+from src.paths import MODELS_DIR
 from src.settings import settings
 
 if TYPE_CHECKING:
     import numpy as np
-
-MODELS_DIR = Path("models")
 
 
 class PPEDetector:

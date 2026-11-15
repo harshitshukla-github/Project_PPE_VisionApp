@@ -37,6 +37,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from src.paths import MODELS_DIR, PROJECT_ROOT
 from src.settings import settings
 
 # ---------------------------------------------------------------------------
@@ -775,7 +776,7 @@ def info_cmd() -> None:
     table.add_row("MLflow URI", settings.mlflow_tracking_uri)
     table.add_row("Log level", settings.log_level)
     table.add_row("Data splits dir", str(settings.data_splits_dir))
-    table.add_row("Models dir", "models/")
+    table.add_row("Models dir", str(MODELS_DIR))
 
     console.print(table)
 
@@ -790,8 +791,8 @@ def info_cmd() -> None:
         ("configs/yolo11l_train.yaml", settings.configs_dir / "yolo11l_train.yaml"),
         ("data/raw/ppe_combined", settings.data_raw_dir / "ppe_combined"),
         ("data/splits/train", settings.data_splits_dir / "train" / "images"),
-        ("models/yolo26l_ppe_best.pt", Path("models") / "yolo26l_ppe_best.pt"),
-        ("models/yolo11l_ppe_best.pt", Path("models") / "yolo11l_ppe_best.pt"),
+        ("models/yolo26l_ppe_best.pt", MODELS_DIR / "yolo26l_ppe_best.pt"),
+        ("models/yolo11l_ppe_best.pt", MODELS_DIR / "yolo11l_ppe_best.pt"),
     ]
 
     for label, path in checks:
@@ -832,7 +833,11 @@ def db_setup_cmd(
     superuser: str = typer.Option(
         "postgres", "--superuser", help="Existing superuser to provision with."
     ),
-    env_file: Path = typer.Option(Path(".env"), "--env-file", help=".env file to update."),
+    # The project's own .env, the one the settings are read from, wherever this is run.
+    env_file: Path = typer.Option(
+        PROJECT_ROOT / ".env", "--env-file", help=".env file to update.",
+        show_default=".env in the project folder",
+    ),
 ) -> None:
     """
     Create the **ppb_app** role and the **ppb** and **ppb_test** databases,
@@ -991,7 +996,8 @@ def db_migrate_cmd() -> None:
 @db_app.command("seed")
 def db_seed_cmd(
     matrix_file: Path = typer.Option(
-        Path("configs/job_matrix.yaml"), "--matrix", help="Job matrix YAML to load."
+        settings.configs_dir / "job_matrix.yaml", "--matrix", help="Job matrix YAML to load.",
+        show_default="configs/job_matrix.yaml in the project folder",
     ),
 ) -> None:
     """
