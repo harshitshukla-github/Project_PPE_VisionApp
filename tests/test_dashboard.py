@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -39,6 +39,13 @@ def dist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def client() -> TestClient:
     """No lifespan, so no model: these routes don't need one."""
     return TestClient(main.app, follow_redirects=False)
+
+
+def _assert_locked_down(headers: Mapping[str, str]) -> None:
+    """The headers every answer under /admin/ carries, whether or not a file was found."""
+    assert headers["content-security-policy"] == dashboard.CONTENT_SECURITY_POLICY
+    assert headers["x-content-type-options"] == "nosniff"
+    assert headers["referrer-policy"] == "no-referrer"
 
 
 @pytest.fixture
@@ -143,10 +150,28 @@ class TestHeaders:
         cache = client.get("/admin/assets/index-abc.js").headers["cache-control"]
         assert cache == "public, max-age=31536000, immutable"
 
+    @pytest.mark.parametrize("path", [
+        "/admin/missing.js", "/admin/assets/gone.js", "/admin/assets/", "/admin/no/such/page",
+    ])
+    def test_a_missing_file_gets_the_same_headers(self, dist: Path, client: TestClient,
+                                                  path: str) -> None:
+        response = client.get(path)
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Not Found"}  # the answer itself is as before
+        _assert_locked_down(response.headers)
+        assert "cache-control" not in response.headers  # a missing asset is never kept for good
+
+    def test_a_refused_method_gets_the_same_headers(self, dist: Path, client: TestClient) -> None:
+        response = client.post("/admin/")
+        assert response.status_code == 405
+        assert response.json() == {"detail": "Method Not Allowed"}
+        _assert_locked_down(response.headers)
+
     def test_the_api_keeps_its_own_headers(self, dist: Path, client: TestClient) -> None:
-        headers = client.get("/api/v1/admin/sites").headers
-        assert "content-security-policy" not in headers
-        assert "referrer-policy" not in headers
+        for path in ("/api/v1/admin/sites", "/api/v1/no-such-route", "/no-such-route"):
+            headers = client.get(path).headers
+            assert "content-security-policy" not in headers
+            assert "referrer-policy" not in headers
 
 
 class TestNotBuilt:
@@ -160,6 +185,7 @@ class TestNotBuilt:
         response = client.get("/admin/")
         assert response.status_code == 503
         assert "npm run build" in response.text
+        _assert_locked_down(response.headers)
 
     def test_a_folder_without_a_page_is_not_a_build(self, no_build: Path,
                                                     client: TestClient) -> None:

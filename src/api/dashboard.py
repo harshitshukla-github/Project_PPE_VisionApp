@@ -13,6 +13,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi.exception_handlers import http_exception_handler
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
@@ -42,6 +45,13 @@ CONTENT_SECURITY_POLICY = "; ".join([
     "frame-ancestors 'none'",
 ])
 
+# On every answer under /admin/, including "not found" and "not built".
+SECURITY_HEADERS = {
+    "Content-Security-Policy": CONTENT_SECURITY_POLICY,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
 # Vite names everything in assets/ after its content, so a new build means new
 # names and these never change. index.html keeps its name, so it is revalidated
 # each time, or a browser would hold on to an old build.
@@ -66,13 +76,20 @@ class DashboardFiles(StaticFiles):
         """Do nothing: a missing build is answered per request, not raised once."""
 
     async def get_response(self, path: str, scope: Scope) -> Response:
-        """Serve one file, or say how to build the dashboard if there is no build."""
+        """Serve one file, or say why not. Whatever the answer, it carries the security headers."""
+        response = await self._answer(path, scope)
+        response.headers.update(SECURITY_HEADERS)
+        return response
+
+    async def _answer(self, path: str, scope: Scope) -> Response:
         if not self.is_built:
             return PlainTextResponse(NOT_BUILT, status_code=503)
-        response = await super().get_response(path, scope)
-        response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "no-referrer"
+        try:
+            response = await super().get_response(path, scope)
+        except HTTPException as exc:
+            # A missing file or a refused method is raised, not returned. Left to rise, the app
+            # would answer it without this page's headers, so give the app's answer from here.
+            return await http_exception_handler(Request(scope), exc)
         in_assets = Path(path).parts[:1] == ("assets",)
         response.headers["Cache-Control"] = CACHE_FOREVER if in_assets else CACHE_REVALIDATE
         return response
