@@ -247,7 +247,9 @@ cd admin && npm ci && npm run build
 
 Then open <http://localhost:8000/admin/>. Rebuild after pulling changes to
 `admin/`; there's no need to restart the server. Set `PPB_ADMIN_DIST` if the build
-lives somewhere else. Until there is a build, `/admin/` says how to make one.
+lives somewhere else; a relative path is from the project root. The server logs
+the full path when it starts. Until there is a build, `/admin/` says how to make
+one.
 
 ## Project layout
 

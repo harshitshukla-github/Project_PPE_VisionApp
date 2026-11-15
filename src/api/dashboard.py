@@ -19,6 +19,11 @@ from starlette.types import Scope
 
 MOUNT_PATH = "/admin"
 
+# A relative PPB_ADMIN_DIST is from here, not from wherever the server was
+# started: under a service manager or a Docker WORKDIR the two differ, and the
+# dashboard would say it hasn't been built when it has.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 NOT_BUILT = (
     "The admin dashboard hasn't been built. Run this, then reload the page:\n\n"
     "    cd admin && npm ci && npm run build\n"
@@ -48,7 +53,9 @@ class DashboardFiles(StaticFiles):
     """The files ``npm run build`` wrote, with headers fit for an admin page."""
 
     def __init__(self, directory: Path) -> None:
-        super().__init__(directory=directory, html=True, check_dir=False)
+        # Joining an absolute path keeps it, so PPB_ADMIN_DIST may be either.
+        super().__init__(directory=(PROJECT_ROOT / directory).resolve(), html=True,
+                         check_dir=False)
 
     @property
     def is_built(self) -> bool:
@@ -65,6 +72,7 @@ class DashboardFiles(StaticFiles):
         response = await super().get_response(path, scope)
         response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
         in_assets = Path(path).parts[:1] == ("assets",)
         response.headers["Cache-Control"] = CACHE_FOREVER if in_assets else CACHE_REVALIDATE
         return response

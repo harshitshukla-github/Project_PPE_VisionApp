@@ -58,9 +58,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(f"Job matrix: {len(jobs)} jobs, read from {matrix_source()}")
 
     if dashboard_files.is_built:
-        logger.info(f"Dashboard: serving {settings.ppb_admin_dist} at {MOUNT_PATH}/")
+        logger.info(f"Dashboard: serving {dashboard_files.directory} at {MOUNT_PATH}/")
     else:
-        logger.warning(NOT_BUILT.strip())
+        logger.warning(f"{NOT_BUILT.strip()}\n(Looked in {dashboard_files.directory}.)")
 
     if settings.ppb_debug_dump_uploads:
         logger.warning(
