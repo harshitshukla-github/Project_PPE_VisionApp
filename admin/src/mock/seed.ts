@@ -1,7 +1,9 @@
 /**
- * Starting data for the mock backend. Illustrative, not real: the jobs echo
- * the live matrix, but the AP50 figures, sites, people and audit entries are
- * made up so every page has something to show.
+ * Starting data for the mock backend. The six jobs are copied by hand from
+ * configs/job_matrix.yaml, the file that seeds a new database: the same
+ * equipment in the same order. Nothing checks them against it, so if that file
+ * changes, change these to match. The AP50 figures, versions, sites, people
+ * and audit entries are made up so every page has something to show.
  */
 import type { AdminUser, AuditEntry, Item, Job, Requirement, Worker } from "../api/types";
 
@@ -59,10 +61,10 @@ export function seedState(now: Date = new Date()): MockState {
   const jobRows: Array<[string, string, number, Requirement[]]> = [
     ["general_labor", "General labor", 2, [req("hardhat"), req("safety_vest"), req("boots")]],
     ["welder", "Welder", 4, [req("hardhat"), req("safety_vest"), req("goggles"), req("gloves"), req("boots"), req("face_shield", "pending")]],
-    ["electrician", "Electrician", 1, [req("hardhat"), req("safety_vest"), req("gloves"), req("boots")]],
+    ["electrician", "Electrician", 1, [req("hardhat"), req("safety_vest"), req("gloves"), req("goggles"), req("boots")]],
     ["height_work", "Height work", 3, [req("hardhat"), req("safety_vest"), req("boots"), req("harness", "pending")]],
-    ["demolition", "Demolition", 1, [req("hardhat"), req("safety_vest"), req("mask"), req("gloves"), req("boots"), req("ear_protection", "pending")]],
-    ["painter", "Painter", 2, [req("safety_vest"), req("mask"), req("gloves")]],
+    ["demolition", "Demolition", 1, [req("hardhat"), req("safety_vest"), req("goggles"), req("mask"), req("gloves"), req("boots"), req("ear_protection", "pending")]],
+    ["painter", "Painter", 2, [req("hardhat"), req("safety_vest"), req("mask"), req("goggles")]],
   ];
   const jobs: Job[] = jobRows.map(([key, display_name, version, requirements], position) => ({
     key,

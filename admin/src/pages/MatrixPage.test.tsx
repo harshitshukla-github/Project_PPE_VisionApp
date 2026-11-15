@@ -30,15 +30,57 @@ describe("MatrixPage", () => {
     expect(screen.getByLabelText("Painter: Boots")).toHaveValue("off");
   });
 
-  it("draws the columns in the order the API gives them: head to toe, not alphabetical", async () => {
+  /** The item names across the top, in the order drawn. The first column is "Job" and the last is "Row" (the Save buttons). */
+  const columnNames = () =>
+    screen
+      .getAllByRole("columnheader")
+      .slice(1, -1)
+      .map((h) => (h.textContent ?? "").replace(/(AP50.*|No AP50|Gemini only)$/, ""));
+
+  it("draws the columns in the order the API gives them, whatever that is", async () => {
+    // Reverse what the API will return. A page that sorted the items itself, alphabetically
+    // or head to toe, would ignore this; one that draws them as given follows it.
+    backend.state.items.reverse();
     await open();
 
-    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent ?? "");
-    // The first column is "Job" and the last is "Row" (the Save buttons); the ones between are items.
-    const items = headers.slice(1, -1).map((text) => text.replace(/(AP50.*|Gemini only)$/, ""));
-    expect(items).toEqual([
+    expect(columnNames()).toEqual([
+      "Boots", "Gloves", "Harness", "Safety vest", "Mask", "Ear protection", "Face shield", "Goggles", "Hardhat",
+    ]);
+  });
+
+  it("draws them head to toe when the API does (the stand-in's own order)", async () => {
+    await open();
+
+    expect(columnNames()).toEqual([
       "Hardhat", "Goggles", "Face shield", "Ear protection", "Mask", "Safety vest", "Harness", "Gloves", "Boots",
     ]);
+  });
+
+  describe("an item with no AP50 figure", () => {
+    const header = (name: string) => screen.getByRole("columnheader", { name: new RegExp(`^${name}`) });
+
+    it("is 'Gemini only' only if the detector can't see it; a detectable item with no figure says 'No AP50'", async () => {
+      // A model with no metrics file: the backend then sends detector_ap50: null for every item
+      // (docs/admin-api.md §4), detectable or not.
+      for (const item of backend.state.items) item.detector_ap50 = null;
+      await open();
+
+      expect(header("Hardhat")).toHaveTextContent("No AP50");
+      expect(header("Hardhat")).not.toHaveTextContent("Gemini only");
+      expect(header("Boots")).not.toHaveTextContent("Gemini only");
+      for (const name of ["Face shield", "Ear protection", "Harness"]) {
+        expect(header(name)).toHaveTextContent("Gemini only");
+      }
+      // Exactly the three the detector can't see, not all nine.
+      expect(screen.getAllByText("Gemini only")).toHaveLength(3);
+    });
+
+    it("shows the figure when there is one", async () => {
+      backend.state.items.find((i) => i.key === "hardhat")!.detector_ap50 = 0.9;
+      await open();
+
+      expect(header("Hardhat")).toHaveTextContent("AP50 0.90");
+    });
   });
 
   it("marks Ear protection 'Gemini only', like Face shield and Harness", async () => {
@@ -87,7 +129,7 @@ describe("MatrixPage", () => {
 
   it("shows the server's reason when a row would have no required item", async () => {
     const user = await open();
-    for (const item of ["Safety vest", "Mask", "Gloves"]) {
+    for (const item of ["Hardhat", "Safety vest", "Mask", "Goggles"]) { // everything Painter requires
       await user.selectOptions(screen.getByLabelText(`Painter: ${item}`), "off");
     }
 
