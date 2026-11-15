@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from loguru import logger
 
-from src.api import main
-from src.api.dashboard import MOUNT_PATH
+from src.api import dashboard, main
+from src.api.dashboard import MOUNT_PATH, DashboardFiles
 
 INDEX = '<!doctype html><title>PPB Admin</title><script src="/admin/assets/index-abc.js"></script>'
 SECRET = "outside the build"
@@ -36,6 +39,15 @@ def dist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def client() -> TestClient:
     """No lifespan, so no model: these routes don't need one."""
     return TestClient(main.app, follow_redirects=False)
+
+
+@pytest.fixture
+def logged() -> Iterator[list[str]]:
+    """What the server logs while a test runs. Ask for it before api_client, which starts it."""
+    lines: list[str] = []
+    sink = logger.add(lines.append, format="{message}")
+    yield lines
+    logger.remove(sink)
 
 
 class TestServing:
@@ -112,6 +124,12 @@ class TestHeaders:
             assert rule in policy
         assert "unsafe" not in policy
         assert headers["x-content-type-options"] == "nosniff"
+        assert headers["referrer-policy"] == "no-referrer"
+
+    def test_built_assets_get_the_same_headers(self, dist: Path, client: TestClient) -> None:
+        headers = client.get("/admin/assets/index-abc.js").headers
+        assert headers["x-content-type-options"] == "nosniff"
+        assert headers["referrer-policy"] == "no-referrer"
 
     def test_the_page_is_revalidated_so_a_new_build_is_seen(self, dist: Path,
                                                             client: TestClient) -> None:
@@ -126,7 +144,9 @@ class TestHeaders:
         assert cache == "public, max-age=31536000, immutable"
 
     def test_the_api_keeps_its_own_headers(self, dist: Path, client: TestClient) -> None:
-        assert "content-security-policy" not in client.get("/api/v1/admin/sites").headers
+        headers = client.get("/api/v1/admin/sites").headers
+        assert "content-security-policy" not in headers
+        assert "referrer-policy" not in headers
 
 
 class TestNotBuilt:
@@ -156,6 +176,59 @@ class TestNotBuilt:
         no_build.mkdir()
         (no_build / "index.html").write_text(INDEX, encoding="utf-8")
         assert client.get("/admin/").status_code == 200
+
+    def test_the_log_says_where_it_looked_but_the_page_does_not(
+        self, no_build: Path, logged: list[str], api_client: TestClient
+    ) -> None:
+        """The full path is for whoever runs the server, not for anyone who opens /admin/."""
+        assert [line for line in logged if "npm run build" in line and str(no_build) in line]
+        assert str(no_build) not in api_client.get("/admin/").text
+
+
+class TestWhereTheBuildIs:
+    @pytest.fixture
+    def project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """A project with a build, and a server started from somewhere else entirely."""
+        root = tmp_path / "project"
+        (root / "admin" / "dist").mkdir(parents=True)
+        (root / "admin" / "dist" / "index.html").write_text(INDEX, encoding="utf-8")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.setattr(dashboard, "PROJECT_ROOT", root.resolve())
+        monkeypatch.chdir(elsewhere)
+        return root.resolve()
+
+    def test_a_relative_path_is_from_the_project_not_the_working_directory(
+        self, project: Path
+    ) -> None:
+        files = DashboardFiles(Path("admin/dist"))
+        assert files.directory == project / "admin" / "dist"
+        assert files.is_built
+
+        app = FastAPI()
+        app.mount(MOUNT_PATH, files)
+        response = TestClient(app).get("/admin/")
+        assert (response.status_code, response.text) == (200, INDEX)
+
+    def test_an_absolute_path_is_used_as_given(self, project: Path, tmp_path: Path) -> None:
+        other = (tmp_path / "builds" / "dashboard").resolve()
+        assert DashboardFiles(other).directory == other
+        assert not DashboardFiles(other).is_built
+
+    def test_the_path_is_tidied_for_the_log(self, project: Path) -> None:
+        files = DashboardFiles(Path("admin/../admin/dist"))
+        assert files.directory == project / "admin" / "dist"
+
+    def test_the_server_uses_an_absolute_path(self) -> None:
+        assert Path(main.dashboard_files.directory).is_absolute()
+
+    def test_the_project_root_really_is_the_project_root(self) -> None:
+        assert (dashboard.PROJECT_ROOT / "admin" / "vite.config.ts").is_file()
+
+    def test_the_log_gives_the_full_path(self, dist: Path, logged: list[str],
+                                         api_client: TestClient) -> None:
+        assert [line for line in logged if line.startswith("Dashboard: serving")
+                and str(dist) in line]
 
 
 def test_the_build_expects_to_live_where_it_is_served() -> None:

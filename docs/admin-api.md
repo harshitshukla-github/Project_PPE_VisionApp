@@ -634,8 +634,8 @@ the read-only matrix. Don't build a review view yet.
   that each route refuses a supervisor where §1 says so, and never shows a
   supervisor another site's workers
 - The built dashboard served at `/admin/` (`src/api/dashboard.py`), from
-  `PPB_ADMIN_DIST` (default `admin/dist`). `/admin/` answers `503` with the
-  build command until there is a build
+  `PPB_ADMIN_DIST` (default `admin/dist`, from the project root). `/admin/`
+  answers `503` with the build command until there is a build
 
 ### Dashboard (Priyanka, Phase 4)
 
