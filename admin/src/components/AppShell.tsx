@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { adminApiIsMocked, type DashboardUser } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { PAGES } from "../pages/registry";
+import { PAGES, PASSWORD_PATH } from "../pages/registry";
 
 /**
  * The frame around every page: the navigation (only the pages this role can
@@ -34,6 +34,9 @@ export function AppShell({ user, path, children }: { user: DashboardUser; path: 
           <span data-testid="whoami">
             {user.display_name} · {user.role}
           </span>
+          <a href={`#${PASSWORD_PATH}`} aria-current={path === PASSWORD_PATH ? "page" : undefined}>
+            Change password
+          </a>
           <button type="button" className="link" onClick={() => void signOut()}>
             Sign out
           </button>

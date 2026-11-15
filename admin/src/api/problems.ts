@@ -26,7 +26,9 @@ export function formatWait(seconds: number): string {
 export function problemFrom(err: unknown, fallback: string): Problem {
   if (!(err instanceof ApiError)) return { message: fallback, tone: "error" };
 
-  if (err.status === 503) {
+  // 502 and 504 come from whatever sits in front of the server (the dev proxy, a load balancer)
+  // when the server is down or slow, and mean the same as 503: not the person's doing.
+  if (err.status === 502 || err.status === 503 || err.status === 504) {
     return { message: "The server can't answer right now. Try again shortly.", tone: "notice" };
   }
 

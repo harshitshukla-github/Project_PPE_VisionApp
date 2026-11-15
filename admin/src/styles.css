@@ -37,6 +37,10 @@
   box-sizing: border-box;
 }
 
+a {
+  color: var(--accent);
+}
+
 body {
   margin: 0;
   background: var(--bg);

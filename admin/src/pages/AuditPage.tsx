@@ -1,6 +1,7 @@
 import { Fragment, useState, type FormEvent } from "react";
 
 import { getAudit, getSites } from "../api/client";
+import { startOfDay, startOfNextDay } from "../dates";
 import { ProblemBanner } from "../components/ProblemBanner";
 import { Loading, Pager, Time } from "../components/widgets";
 import { usePages, useResource } from "../hooks/useResource";
@@ -28,10 +29,6 @@ interface Filters {
 
 const NO_FILTERS: Filters = { action: "", target: "", actor: "", site: "", from: "", to: "" };
 
-/** `from` is the start of that day, UTC. `to` is the day after: the API's `to` is exclusive, the person's isn't. */
-const startOfDay = (day: string) => (day ? `${day}T00:00:00Z` : undefined);
-const endOfDay = (day: string) =>
-  day ? new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().replace(".000Z", "Z") : undefined;
 
 function Details({ label, value }: { label: string; value: Record<string, unknown> | null }) {
   return (
@@ -60,7 +57,7 @@ export function AuditPage() {
         actor: applied.actor.trim(),
         site: applied.site,
         from: startOfDay(applied.from),
-        to: endOfDay(applied.to),
+        to: startOfNextDay(applied.to),
         limit: PAGE_SIZE,
         cursor,
       }),

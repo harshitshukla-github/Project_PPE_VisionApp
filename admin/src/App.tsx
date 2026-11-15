@@ -3,12 +3,13 @@ import { useAuth } from "./auth/AuthContext";
 import { AppShell } from "./components/AppShell";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { LoginPage } from "./pages/LoginPage";
-import { DEFAULT_PATH, PAGES } from "./pages/registry";
+import { UnavailablePage } from "./pages/UnavailablePage";
+import { DEFAULT_PATH, PAGES, PASSWORD_PATH } from "./pages/registry";
 import { useHashPath } from "./router";
 
 /**
  * Which screen to show is decided by who is signed in (auth-api §6):
- * checking → spinner; signed out → login; still on the temporary password →
+ * checking → spinner; server didn't answer → "try again"; signed out → login; still on the temporary password →
  * change password; otherwise the dashboard. When the state changes (login,
  * logout, a 401 anywhere) the screen changes with it.
  */
@@ -22,6 +23,7 @@ export function App() {
       </main>
     );
   }
+  if (auth.kind === "unavailable") return <UnavailablePage problem={auth.problem} />;
   if (auth.kind === "signedOut") return <LoginPage notice={auth.notice} />;
   if (auth.user.must_change_password) return <ChangePasswordPage />;
   return <Dashboard user={auth.user} />;
@@ -35,7 +37,9 @@ function Dashboard({ user }: { user: DashboardUser }) {
 
   return (
     <AppShell user={user} path={path}>
-      {!page ? (
+      {path === PASSWORD_PATH ? (
+        <ChangePasswordPage voluntary />
+      ) : !page ? (
         <section className="page">
           <h1>Page not found</h1>
           <p>
