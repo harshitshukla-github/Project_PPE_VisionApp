@@ -14,6 +14,11 @@ export function navigate(path: string): void {
   window.location.hash = path;
 }
 
+/** Like `navigate`, but in place of the current history entry, so Back doesn't return to the address being left. */
+export function replacePath(path: string): void {
+  window.location.replace(`#${path}`);
+}
+
 /** The current page's path, kept up to date when the hash changes. */
 export function useHashPath(): string {
   const [path, setPath] = useState(currentPath);

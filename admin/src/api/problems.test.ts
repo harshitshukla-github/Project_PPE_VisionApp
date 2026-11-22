@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "./client";
-import { formatWait, problemFrom, SessionNotKeptError } from "./problems";
+import { formatWait, isOutage, problemFrom, SessionNotKeptError } from "./problems";
 
 describe("formatWait", () => {
   it.each([
@@ -12,6 +12,20 @@ describe("formatWait", () => {
     [840, "14 minutes"],
   ])("%i s -> %s", (seconds, expected) => {
     expect(formatWait(seconds)).toBe(expected);
+  });
+});
+
+describe("isOutage: the server couldn't be reached, or couldn't answer", () => {
+  it.each([0, 502, 503, 504])("status %i is an outage", (status) => {
+    expect(isOutage(new ApiError(status, "x"))).toBe(true);
+  });
+
+  it.each([401, 403, 404, 422, 500])("status %i is the server answering, not an outage", (status) => {
+    expect(isOutage(new ApiError(status, "x"))).toBe(false);
+  });
+
+  it("an error that didn't come from a request isn't one", () => {
+    expect(isOutage(new SyntaxError("Unexpected token <"))).toBe(false);
   });
 });
 
@@ -66,29 +80,45 @@ describe("problemFrom (auth-api §3, by `code`)", () => {
     expect(problem).toEqual({ message: "The server can't answer right now. Try again shortly.", tone: "notice" });
   });
 
-  it("an unreachable server keeps its own message, in red", () => {
+  it("an unreachable server keeps its own message, in amber: an outage isn't the person's doing", () => {
     const err = new ApiError(0, "Can't reach the server.");
-    expect(problemFrom(err, "x")).toEqual({ message: "Can't reach the server.", tone: "error" });
+    expect(problemFrom(err, "x")).toEqual({ message: "Can't reach the server.", tone: "notice" });
   });
 
   describe("a sign-in the browser didn't keep", () => {
-    it("on a page that isn't HTTPS: names the address and says to use HTTPS or localhost", () => {
-      const problem = problemFrom(new SessionNotKeptError(true, "http://192.168.29.210:8000"), "x");
+    it("on a page that isn't HTTPS: names the address and says to use HTTPS", () => {
+      const problem = problemFrom(
+        new SessionNotKeptError(true, "http://192.168.29.210:8000", "http://localhost:8000/admin/"),
+        "x",
+      );
 
       expect(problem.tone).toBe("error");
       expect(problem.message).toContain("You signed in, but your browser didn't keep the session");
       expect(problem.message).toContain("http://192.168.29.210:8000 isn't a secure (HTTPS) address");
       expect(problem.message).toContain("https://");
-      expect(problem.message).toContain("http://localhost");
       expect(problem.message).not.toContain("session ended"); // not the ordinary expiry
     });
 
+    it("offers localhost only for the computer that runs the server, with the port and path to open there", () => {
+      // Read on another device, a bare "http://localhost" would be that device, not the server.
+      const problem = problemFrom(
+        new SessionNotKeptError(true, "http://192.168.29.210:8000", "http://localhost:8000/admin/"),
+        "x",
+      );
+
+      expect(problem.message).toContain("on the computer that runs the server, at http://localhost:8000/admin/");
+    });
+
     it("on a secure page: says to check cookies, and doesn't blame the address", () => {
-      const problem = problemFrom(new SessionNotKeptError(false, "https://dashboard.example.com"), "x");
+      const problem = problemFrom(
+        new SessionNotKeptError(false, "https://dashboard.example.com", "http://localhost/admin/"),
+        "x",
+      );
 
       expect(problem.message).toContain("didn't keep the session");
       expect(problem.message).toContain("allows cookies");
       expect(problem.message).not.toContain("isn't a secure");
+      expect(problem.message).not.toContain("localhost");
     });
   });
 

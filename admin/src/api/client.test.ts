@@ -170,4 +170,32 @@ describe("a 401 not_authenticated", () => {
 
     expect(ended).not.toHaveBeenCalled();
   });
+
+  it("on a quiet check, is reported to the caller only: the check right after a sign-in isn't a session ending", async () => {
+    const ended = vi.fn();
+    setSessionEndedHandler(ended);
+    const fetchMock = mockApi({
+      "POST /api/v1/auth/login": () => ok(ADMIN_SESSION),
+      "GET /api/v1/auth/me": () => fail(401, { detail: "Sign in.", code: "not_authenticated" }),
+      "POST /api/v1/auth/password": () => noContent(),
+    });
+    await login("admin@example.com", "pw");
+
+    await expect(getSession({ quiet: true })).rejects.toMatchObject({ status: 401, code: "not_authenticated" });
+
+    expect(ended).not.toHaveBeenCalled();
+    // The CSRF token from the login is still forgotten: there is no session for it to belong to.
+    await changePassword("old", "new");
+    expect(headersOf(fetchMock, 2)["X-CSRF-Token"]).toBeUndefined();
+  });
+
+  it("on an ordinary check, still tells the app", async () => {
+    const ended = vi.fn();
+    setSessionEndedHandler(ended);
+    mockApi({ "GET /api/v1/auth/me": () => fail(401, { detail: "Sign in.", code: "not_authenticated" }) });
+
+    await expect(getSession()).rejects.toMatchObject({ status: 401 });
+
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
 });

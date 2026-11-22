@@ -74,12 +74,13 @@ describe("on page load (GET /auth/me)", () => {
     expect(screen.queryByTestId("whoami")).toBeNull();
   });
 
-  it("says so when the server can't be reached, rather than showing a sign-in form", async () => {
+  it("says so in amber when the server can't be reached, rather than showing a sign-in form", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
 
     renderApp();
 
-    expect(await screen.findByText("Can't reach the server.")).toBeInTheDocument();
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent("Can't reach the server.");
+    expect(screen.queryByTestId("problem-error")).toBeNull(); // an outage isn't the person's doing
     expect(screen.queryByLabelText("Email")).toBeNull();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
@@ -268,6 +269,38 @@ describe("change password page", () => {
 
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByText("Your session ended. Sign in again.")).toBeInTheDocument();
+  });
+
+  it("started at #/password, a forced change ends on the dashboard, not on a second, empty password form", async () => {
+    // Someone on the Change password page forgets their password, an admin resets it, and they sign
+    // in again in the same tab: the address still says #/password when the forced change opens.
+    window.location.hash = "#/password";
+    mockApi({
+      "GET /api/v1/auth/me": () => ok(MUST_CHANGE_SESSION),
+      "POST /api/v1/auth/password": () => noContent(),
+    });
+    renderApp();
+    await screen.findByText("Choose a new password");
+    const user = userEvent.setup();
+
+    await fill(user, "temporary-pass", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Current password")).toBeNull(); // no blank form that looks like the save failed
+    expect(window.location.hash).toBe("#/matrix");
+  });
+
+  it("while the change is forced, an address moved back to #/password doesn't stick", async () => {
+    const user = await openChangePage();
+
+    window.location.hash = "#/password";
+    await waitFor(() => expect(window.location.hash).toBe("#/matrix"));
+
+    await fill(user, "temporary-pass", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+    expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Current password")).toBeNull();
   });
 });
 
@@ -625,6 +658,63 @@ describe("when the server is down as the page loads", () => {
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
+
+  it.each([
+    ["503", () => fail(503, { detail: "No database configured.", code: "auth_unavailable" })],
+    ["504", () => new Response("Gateway Timeout", { status: 504, statusText: "Gateway Timeout" })],
+  ])("a %s is the same screen", async (_status, answer) => {
+    mockApi({ "GET /api/v1/auth/me": answer });
+
+    renderApp();
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByTestId("problem-notice")).toHaveTextContent("Try again shortly");
+    expect(screen.queryByLabelText("Email")).toBeNull();
+  });
+});
+
+describe("when the page-load check fails for a reason that isn't an outage", () => {
+  /** The server is up and answering, but something in it broke. */
+  const serverError = () =>
+    new Response("Internal Server Error", { status: 500, statusText: "Internal Server Error" });
+
+  it("shows the sign-in form with a plain amber note: not the outage screen, not the raw status text", async () => {
+    mockApi({ "GET /api/v1/auth/me": serverError });
+
+    renderApp();
+
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByTestId("problem-notice")).toHaveTextContent("Couldn't check whether you're signed in");
+    expect(screen.queryByText(/Internal Server Error/)).toBeNull();
+    expect(screen.queryByText(/isn't answering/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("lets the person sign in from there", async () => {
+    let loggedIn = false;
+    mockApi({
+      "GET /api/v1/auth/me": () => (loggedIn ? ok(ADMIN_SESSION) : serverError()),
+      "POST /api/v1/auth/login": () => {
+        loggedIn = true;
+        return ok(ADMIN_SESSION);
+      },
+    });
+    renderApp();
+
+    await signInWith("admin@example.com", "correct horse battery staple");
+
+    expect(await screen.findByTestId("whoami")).toHaveTextContent("Test Admin · admin");
+  });
+
+  it("treats an answer that isn't the API's at all (a page of HTML) the same way", async () => {
+    mockApi({ "GET /api/v1/auth/me": () => new Response("<html>not the API</html>", { status: 200 }) });
+
+    renderApp();
+
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByTestId("problem-notice")).toHaveTextContent("Couldn't check whether you're signed in");
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
 });
 
 describe("when the browser doesn't keep the sign-in cookie (item 5: plain http on a LAN address)", () => {
@@ -666,10 +756,44 @@ describe("when the browser doesn't keep the sign-in cookie (item 5: plain http o
     const alert = await screen.findByTestId("problem-error");
     expect(alert).toHaveTextContent("You signed in, but your browser didn't keep the session");
     expect(alert).toHaveTextContent(`${window.location.origin} isn't a secure (HTTPS) address`); // names the page's own address
-    expect(alert).toHaveTextContent("http://localhost");
+    // localhost only helps on the server's own computer, so it says so, with this page's port and path.
+    const { port, pathname } = window.location;
+    expect(alert).toHaveTextContent(
+      `on the computer that runs the server, at http://localhost${port ? `:${port}` : ""}${pathname}`,
+    );
     expect(screen.queryByText("Your session ended. Sign in again.")).toBeNull();
     expect(screen.getByLabelText("Email")).toBeInTheDocument(); // still the sign-in page
     expect(screen.queryByTestId("whoami")).toBeNull(); // the dashboard never flashed up
+  });
+
+  it("a second attempt never shows 'Your session ended' while it is in flight", async () => {
+    // On a LAN address no attempt on that page can succeed, so people try again. The check after
+    // sign-in must not leave a "session ended" note behind for that second attempt to uncover.
+    pageIsSecure(false);
+    let held: Promise<void> | null = null;
+    let release = () => {};
+    mockApi({
+      "GET /api/v1/auth/me": NOT_SIGNED_IN, // the cookie never comes back
+      "POST /api/v1/auth/login": async () => {
+        if (held) await held;
+        return ok(ADMIN_SESSION);
+      },
+    });
+    renderApp();
+    const user = await signInWith("admin@example.com", "correct horse battery staple");
+    await screen.findByText(/didn't keep the session/);
+
+    held = new Promise<void>((resolve) => (release = resolve));
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByRole("button", { name: "Signing in…" })).toBeDisabled();
+    expect(screen.queryByText("Your session ended. Sign in again.")).toBeNull();
+    expect(screen.queryByTestId("problem-error")).toBeNull(); // nothing to say until the answer is in
+
+    release();
+    expect(await screen.findByText(/didn't keep the session/)).toBeInTheDocument();
+    expect(screen.queryByText("Your session ended. Sign in again.")).toBeNull();
   });
 
   it("on a secure page where the cookie still isn't kept: says to check cookies, not the address", async () => {

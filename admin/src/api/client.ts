@@ -157,11 +157,22 @@ async function toApiError(response: Response): Promise<ApiError> {
   }
 }
 
+interface RequestOptions {
+  /** Set on the one retry after a `csrf_failed`, so it can't loop. */
+  retriedAfterCsrf?: boolean;
+  /**
+   * Report a `401 not_authenticated` to the caller only, not to the
+   * session-ended handler. For a caller that is asking whether there is a
+   * session at all, where "no" is an answer and not a session ending.
+   */
+  quiet?: boolean;
+}
+
 async function request<T>(
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
-  retriedAfterCsrf = false,
+  options: RequestOptions = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -184,14 +195,14 @@ async function request<T>(
     const error = await toApiError(response);
     // A write with a stale token: fetch a fresh one and try again, once
     // (auth-api §6, admin-api §2).
-    if (error.code === "csrf_failed" && !retriedAfterCsrf) {
+    if (error.code === "csrf_failed" && !options.retriedAfterCsrf) {
       await getSession();
-      return request<T>(method, path, body, true);
+      return request<T>(method, path, body, { ...options, retriedAfterCsrf: true });
     }
     if (error.status === 401 && error.code === "not_authenticated") {
       csrfToken = null;
       currentUser = null;
-      onSessionEnded?.();
+      if (!options.quiet) onSessionEnded?.();
     }
     throw error;
   }
@@ -217,9 +228,18 @@ function withSite(session: SessionResponse): SessionResponse {
   return { ...session, user: { ...session.user, site: session.user.site ?? null } };
 }
 
-/** `GET /auth/me`: who is signed in, and a fresh CSRF token. Called on every page load. */
-export async function getSession(): Promise<SessionResponse> {
-  const session = withSite(await request<SessionResponse>("GET", "/auth/me"));
+/**
+ * `GET /auth/me`: who is signed in, and a fresh CSRF token. Called on every page load.
+ *
+ * With `quiet`, a `401` is only thrown to the caller; the session-ended
+ * handler isn't told. The check right after a sign-in uses it: a `401` there
+ * means the browser didn't keep the cookie, which the sign-in page explains
+ * itself, and "Your session ended" would be the wrong thing to say.
+ */
+export async function getSession(options: { quiet?: boolean } = {}): Promise<SessionResponse> {
+  const session = withSite(
+    await request<SessionResponse>("GET", "/auth/me", undefined, { quiet: options.quiet }),
+  );
   csrfToken = session.csrf_token;
   currentUser = session.user;
   return session;
