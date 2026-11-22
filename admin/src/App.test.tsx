@@ -1,9 +1,9 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import { resetClientState, setAdminTransport } from "./api/client";
+import { REQUEST_TIMEOUT_MS, resetClientState, setAdminTransport } from "./api/client";
 import { AuthProvider } from "./auth/AuthContext";
 import {
   ADMIN_SESSION,
@@ -419,6 +419,70 @@ describe("the signed-in dashboard", () => {
 
     expect(await screen.findByTestId("mock-banner")).toHaveTextContent("Sample data");
   });
+
+  describe("a page that breaks", () => {
+    /** The Matrix, given an answer it can't draw: an AP50 that arrives as text, not a number. */
+    function openWithABrokenMatrix() {
+      const quiet = vi.spyOn(console, "error").mockImplementation(() => {}); // React reports the caught error
+      const backend = startMockBackend(ADMIN_SESSION.user);
+      backend.state.items[0].detector_ap50 = "0.909" as unknown as number;
+      mockApi({ "GET /api/v1/auth/me": () => ok(ADMIN_SESSION) });
+      window.location.hash = "#/matrix";
+      renderApp();
+      return { backend, quiet };
+    }
+
+    it("says so in place of that page, and keeps the rest of the dashboard, instead of a blank screen", async () => {
+      const { quiet } = openWithABrokenMatrix();
+
+      expect(await screen.findByRole("heading", { name: "Something went wrong on this page" })).toBeInTheDocument();
+      expect(screen.getByRole("navigation", { name: "Pages" })).toBeInTheDocument(); // the frame is still there
+      expect(screen.getByTestId("whoami")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Reload the page" })).toBeInTheDocument();
+      quiet.mockRestore();
+    });
+
+    it("another page still opens, and coming back tries the broken one again", async () => {
+      const { backend, quiet } = openWithABrokenMatrix();
+      const user = userEvent.setup();
+      await screen.findByRole("heading", { name: "Something went wrong on this page" });
+
+      await user.click(screen.getByRole("link", { name: "Workers" }));
+      expect(await screen.findByRole("heading", { name: "Workers" })).toBeInTheDocument();
+
+      backend.state.items[0].detector_ap50 = 0.909; // fixed meanwhile
+      await user.click(screen.getByRole("link", { name: "Matrix" }));
+      expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+      expect(screen.queryByText("Something went wrong on this page")).toBeNull();
+      quiet.mockRestore();
+    });
+  });
+});
+
+describe("when the server never answers", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("stops waiting after a while and offers Try again, instead of 'Loading…' for ever", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted.", "AbortError")));
+          }),
+      ),
+    );
+    renderApp();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    });
+
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByTestId("problem-notice")).toHaveTextContent("The server didn't answer in time.");
+  });
 });
 
 describe("the admin API: real by default, a stand-in only on request", () => {
@@ -503,6 +567,21 @@ describe("changing your own password later", () => {
     expect(screen.getByRole("navigation", { name: "Pages" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Change password" })).toHaveAttribute("aria-current", "page");
     expect(screen.getAllByRole("button", { name: "Sign out" })).toHaveLength(1); // the header's; the forced page's own is not shown
+    // A page inside the frame, not a second sign-in-style card: the frame's <main> is the only one.
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+  });
+
+  it("moves focus to 'Password changed', so a screen reader says it worked", async () => {
+    openAs(ADMIN_SESSION);
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "my-old-password-1", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    await screen.findByTestId("password-changed");
+    expect(screen.getByRole("heading", { name: "Password changed" })).toHaveFocus();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
   });
 
   it("changes the password with the CSRF token, says so, and offers the way back", async () => {

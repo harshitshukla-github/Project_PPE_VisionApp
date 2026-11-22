@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ADMIN_SESSION, fail, headersOf, mockApi, noContent, ok } from "../testing/mockApi";
 import {
   ApiError,
+  REQUEST_TIMEOUT_MS,
   changePassword,
   getSession,
   login,
@@ -143,6 +144,54 @@ describe("errors", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
 
     await expect(getSession()).rejects.toMatchObject({ status: 0, message: "Can't reach the server." });
+  });
+});
+
+describe("a server that takes the request and never answers", () => {
+  /** A fetch that hangs until it is aborted, as a stuck server or proxy does. */
+  function hangingFetch() {
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted.", "AbortError")));
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("a read gives up after REQUEST_TIMEOUT_MS, as an outage (status 0) that says what happened", async () => {
+    hangingFetch();
+    let settled = false;
+    const result = getSession().finally(() => (settled = true));
+    const rejected = expect(result).rejects.toMatchObject({ status: 0, message: "The server didn't answer in time." });
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
+    expect(settled).toBe(false); // not a moment sooner
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+  });
+
+  it("a write that times out says it may or may not have been saved: the server may have done it", async () => {
+    hangingFetch();
+    const failed = changePassword("old", "new").catch((err: unknown) => err);
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+
+    const err = await failed;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 0 });
+    expect((err as ApiError).message).toContain("may or may not have been saved");
+  });
+
+  it("an answer in time leaves no timer running", async () => {
+    mockApi({ "GET /api/v1/auth/me": () => ok(ADMIN_SESSION) });
+
+    await getSession();
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

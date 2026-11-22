@@ -219,6 +219,27 @@ button.link {
   margin: 0;
 }
 
+/* Change password and Sign out sit side by side, so they look alike: no underline until hovered,
+   and the link for the page you're on is marked the way the navigation marks it. */
+.who a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.who a:hover,
+.who button.link:hover {
+  text-decoration: underline;
+}
+
+.who a[aria-current="page"] {
+  font-weight: 600;
+}
+
+/* A page that is one short form (Change password): as wide as the form needs. */
+.page.narrow {
+  max-width: 28rem;
+}
+
 .content {
   max-width: 80rem;
   margin: 0 auto;

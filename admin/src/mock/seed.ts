@@ -1,9 +1,10 @@
 /**
  * Starting data for the mock backend. The six jobs are copied by hand from
  * configs/job_matrix.yaml, the file that seeds a new database: the same
- * equipment in the same order. Nothing checks them against it, so if that file
- * changes, change these to match. The AP50 figures, versions, sites, people
- * and audit entries are made up so every page has something to show.
+ * equipment in the same order. `seed.test.ts` reads that file and fails if
+ * they differ, so if it changes, change these to match. The AP50 figures,
+ * versions, sites, people and audit entries are made up so every page has
+ * something to show.
  */
 import type { AdminUser, AuditEntry, Item, Job, Requirement, Worker } from "../api/types";
 

@@ -207,7 +207,9 @@ export function MatrixPage({ user }: { user: DashboardUser }) {
                       ) : item.detectable ? (
                         // The detector can see it, but the loaded model has no accuracy figure for it
                         // (no metrics file): not the same as "only Gemini can judge it".
-                        <Tag>No AP50</Tag>
+                        <Tag title="The loaded model has no accuracy figures, so there is no AP50 to show. The detector still checks this item.">
+                          No AP50
+                        </Tag>
                       ) : (
                         <Tag tone="warn">Gemini only</Tag>
                       )}

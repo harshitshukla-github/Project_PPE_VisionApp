@@ -179,20 +179,37 @@ async function request<T>(
   if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
 
   const send = await transportFor(path);
-  let response: Response;
+  // A server (or proxy) that takes the request and never answers would otherwise leave the page
+  // on "Loading…" or "Saving…" for ever. The timer covers reading the answer too.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let error: ApiError | undefined;
+  let result: T | undefined;
   try {
-    response = await send(`${API}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      credentials: "same-origin",
-    });
-  } catch {
-    throw new ApiError(0, "Can't reach the server.");
+    let response: Response;
+    try {
+      response = await send(`${API}${path}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+    } catch {
+      throw new ApiError(0, "Can't reach the server.");
+    }
+    if (!response.ok) error = await toApiError(response);
+    else if (response.status !== 204) result = (await response.json()) as T;
+  } catch (err) {
+    // Anything that went wrong because the timer ran out is the timeout, whatever was thrown.
+    // Otherwise it is passed on as it is: an answer that isn't JSON stays a SyntaxError.
+    if (controller.signal.aborted) throw timedOut(method);
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 
-  if (!response.ok) {
-    const error = await toApiError(response);
+  if (error) {
     // A write with a stale token: fetch a fresh one and try again, once
     // (auth-api §6, admin-api §2).
     if (error.code === "csrf_failed" && !options.retriedAfterCsrf) {
@@ -206,8 +223,28 @@ async function request<T>(
     }
     throw error;
   }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  return result as T;
+}
+
+/**
+ * How long a request may take before the dashboard stops waiting. Every admin
+ * call is a small database read or write, so this is generous; it only exists
+ * so a hung server ends in a message and a Try again, not a spinner.
+ */
+export const REQUEST_TIMEOUT_MS = 20_000;
+
+/**
+ * Status 0, like no answer at all (`isOutage`). A read can simply be tried
+ * again. A write may have been carried out before the server went quiet, so
+ * the person is told to look before doing it again.
+ */
+function timedOut(method: string): ApiError {
+  return new ApiError(
+    0,
+    method === "GET"
+      ? "The server didn't answer in time."
+      : "The server didn't answer in time, so this may or may not have been saved. Reload the page to check.",
+  );
 }
 
 /** `?a=1&b=x`, leaving out anything undefined, null or empty. */
