@@ -587,12 +587,13 @@ out for everything.
 
 ---
 
-## 10. Coming later: checks and their review (Phase 5)
+## 10. Coming later: checks and their review (roadmap P6)
 
 Supervisors are meant to review checks, `NEEDS_REVIEW` above all
 (AGENTS.md §15). Checks aren't stored yet, so there is nothing to review in
-this phase. Phase 5 stores every check, with the worker's photo, and gets
-its own contract:
+this phase. The next phase (roadmap P6) stores every check, with the
+worker's photo, and has its own contract, drafted in
+[`docs/checks-api.md`](checks-api.md):
 
 - a checks list, filtered by site, worker, job, verdict and date
 - a check's detail, with the photo and Gemini's findings
