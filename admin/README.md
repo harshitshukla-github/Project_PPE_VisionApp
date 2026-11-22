@@ -57,7 +57,8 @@ ever talks to `localhost:5173`. That keeps the session cookie
   drops the `Secure` cookie, because the page isn't HTTPS. The dashboard says so
   right after you sign in ("You signed in, but your browser didn't keep the
   session…"), instead of letting you in and then bouncing you out. Use an
-  `https://` address or `http://localhost`. For development only, you can set
+  `https://` address or, on the computer that runs the server, `http://localhost`
+  (on any other device, `localhost` is that device). For development only, you can set
   `PPB_COOKIE_SECURE=false` in `.env` and restart the backend; the dashboard
   then signs in normally.
 
@@ -77,7 +78,7 @@ running, open <http://localhost:8000/admin/>. Rebuilding needs no restart. Until
 there is a build, `/admin/` says how to make one, and the API and the mobile app
 work as usual.
 
-Use HTTPS or `localhost`. Over plain `http://192.168.x.x:8000` the browser drops
+Use HTTPS, or `localhost` on the computer that runs the server. Over plain `http://192.168.x.x:8000` the browser drops
 the `Secure` session cookie, so sign-in won't stick; `PPB_COOKIE_SECURE=false` gets
 round that for development only.
 
@@ -121,13 +122,20 @@ npm run build
   `401 not_authenticated` anywhere returns the user to the login page.
 - `src/api/types.ts` is the contract's shapes written down once. The pages and
   the stand-in are both typed against it.
-- `src/api/problems.ts` turns an error `code` into words. Server trouble (any
-  `503`) is an amber "try again shortly" notice, never a red error.
+- `src/api/problems.ts` turns an error `code` into words. An outage (`isOutage`:
+  no answer at all, or a `502`/`503`/`504` from the server or a proxy in front of
+  it) is an amber notice, never a red error: it isn't the person's doing.
 - `src/auth/AuthContext.tsx` holds who is signed in. `GET /auth/me` runs on
   every page load; until it answers, the app shows a spinner, not the login page.
-  If the server doesn't answer at all (down, or a `502`/`503`/`504` from a proxy
-  in front of it), the app says so and offers "Try again" instead of showing a
-  sign-in form: nobody knows yet whether the session is still good.
+  On an outage the app says so and offers "Try again" instead of showing a
+  sign-in form: nobody knows yet whether the session is still good. Any other
+  error there (a `500`, say) means the server is up, so the sign-in form opens
+  with a note saying the check failed.
+- The check right after a sign-in (did the browser keep the cookie?) is
+  `getSession({ quiet: true })`: its `401` is explained on the sign-in page, so
+  it doesn't also count as "Your session ended".
+- While a password change is forced, the address is moved off `#/password`, so
+  finishing it lands on the dashboard rather than on the voluntary form.
 - "Change password" in the header opens the same page that is forced on a first
   sign-in, inside the normal frame, with its own wording and a way back.
 - A picked day in the audit filter means that day where the person is

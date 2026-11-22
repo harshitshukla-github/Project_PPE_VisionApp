@@ -17,7 +17,7 @@ import {
   setSessionEndedHandler,
   type DashboardUser,
 } from "../api/client";
-import { problemFrom, SessionNotKeptError, type Problem } from "../api/problems";
+import { isOutage, problemFrom, SessionNotKeptError, type Problem } from "../api/problems";
 
 /**
  * Who is using the dashboard. `loading` lasts only until `GET /auth/me` has
@@ -50,6 +50,19 @@ const AuthContext = createContext<AuthApi | undefined>(undefined);
 
 const SESSION_ENDED: Problem = { message: "Your session ended. Sign in again.", tone: "error" };
 
+// The server answered the page-load check, but with an error of its own (a 500, say). It is up, so
+// a sign-in form is some use; this note is why the person is seeing one. Amber: not their doing.
+const CHECK_FAILED: Problem = {
+  message: "Couldn't check whether you're signed in. Sign in to continue.",
+  tone: "notice",
+};
+
+/** This page as opened on the server's own computer, where plain http keeps the cookie. */
+function addressOnTheServer(): string {
+  const { port, pathname } = window.location;
+  return `http://localhost${port ? `:${port}` : ""}${pathname}`;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<AuthState>({ kind: "loading" });
   // Only the latest check may change the state; an older one still in flight is ignored.
@@ -65,8 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (attempt.current !== mine) return;
         if (err instanceof ApiError && err.status === 401) {
           setAuth({ kind: "signedOut" }); // just "not signed in yet": nothing to explain
-        } else {
+        } else if (isOutage(err)) {
           setAuth({ kind: "unavailable", problem: problemFrom(err, "Couldn't reach the server.") });
+        } else {
+          setAuth({ kind: "signedOut", notice: CHECK_FAILED }); // the server is up, so signing in can work
         }
       },
     );
@@ -94,11 +109,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // http at a LAN address it refuses a `Secure` cookie. Ask who we are once, so that case is told
     // here, on the sign-in page, instead of as "Your session ended" after the dashboard has opened.
     // Only a 401 means the cookie didn't come back; a server hiccup doesn't undo a sign-in the server accepted.
+    // Quiet, so that 401 isn't also announced as "Your session ended": that note would stay behind
+    // and show again while the next attempt is in flight.
     try {
-      await getSession();
+      await getSession({ quiet: true });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        throw new SessionNotKeptError(window.isSecureContext === false, window.location.origin);
+        throw new SessionNotKeptError(
+          window.isSecureContext === false,
+          window.location.origin,
+          addressOnTheServer(),
+        );
       }
     }
     setAuth({ kind: "signedIn", user: session.user });

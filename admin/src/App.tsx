@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+
 import type { DashboardUser } from "./api/client";
 import { useAuth } from "./auth/AuthContext";
 import { AppShell } from "./components/AppShell";
@@ -5,7 +7,7 @@ import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { LoginPage } from "./pages/LoginPage";
 import { UnavailablePage } from "./pages/UnavailablePage";
 import { DEFAULT_PATH, PAGES, PASSWORD_PATH } from "./pages/registry";
-import { useHashPath } from "./router";
+import { currentPath, replacePath, useHashPath } from "./router";
 
 /**
  * Which screen to show is decided by who is signed in (auth-api §6):
@@ -15,6 +17,21 @@ import { useHashPath } from "./router";
  */
 export function App() {
   const { auth } = useAuth();
+  const forced = auth.kind === "signedIn" && auth.user.must_change_password;
+
+  // While the change is forced, the address is never the voluntary Change password page. Otherwise
+  // finishing the forced change at `#/password` would open that page: a second, empty form with no
+  // confirmation, as if the save had failed. Done while the forced page is up, not on success,
+  // because the dashboard reads the address the moment the change is accepted.
+  useEffect(() => {
+    if (!forced) return;
+    const leave = () => {
+      if (currentPath() === PASSWORD_PATH) replacePath(DEFAULT_PATH);
+    };
+    leave();
+    window.addEventListener("hashchange", leave);
+    return () => window.removeEventListener("hashchange", leave);
+  }, [forced]);
 
   if (auth.kind === "loading") {
     return (

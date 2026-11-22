@@ -4,7 +4,7 @@
  *
  * `error` is red: something the person should do differently. `notice` is
  * amber: nothing is wrong with what they did, the server just can't answer
- * right now.
+ * right now (see `isOutage`).
  */
 import { ApiError } from "./client";
 
@@ -26,13 +26,33 @@ export class SessionNotKeptError extends Error {
   readonly insecure: boolean;
   /** The page's own address, such as `http://192.168.29.210:8000`. */
   readonly address: string;
+  /**
+   * The same page as opened on the server's own computer, such as
+   * `http://localhost:8000/admin/`. On any other device "localhost" is that
+   * device, so the message has to say where this address works.
+   */
+  readonly localAddress: string;
 
-  constructor(insecure: boolean, address: string) {
+  constructor(insecure: boolean, address: string, localAddress: string) {
     super("The browser didn't keep the session cookie.");
     this.name = "SessionNotKeptError";
     this.insecure = insecure;
     this.address = address;
+    this.localAddress = localAddress;
   }
+}
+
+const OUTAGE_STATUSES = new Set([0, 502, 503, 504]);
+
+/**
+ * An outage: no answer came back at all (status 0: the server is down, or the
+ * network is), or a `502`/`503`/`504` came from the server or from whatever
+ * sits in front of it (the dev proxy, a load balancer). It is not the person's
+ * doing, and it says nothing about whether they are signed in. Any other
+ * error is the server answering.
+ */
+export function isOutage(err: unknown): err is ApiError {
+  return err instanceof ApiError && OUTAGE_STATUSES.has(err.status);
 }
 
 /** "14 minutes", "1 minute", "40 seconds" — rounded up so it never says "0 minutes". */
@@ -50,20 +70,21 @@ export function problemFrom(err: unknown, fallback: string): Problem {
     return {
       message: err.insecure
         ? `You signed in, but your browser didn't keep the session. ${err.address} isn't a secure (HTTPS) address, ` +
-          "and browsers drop the sign-in cookie on such pages. Open the dashboard at an https:// address, " +
-          "or at http://localhost."
+          "and browsers drop the sign-in cookie on such pages. Open the dashboard at an https:// address or, " +
+          `on the computer that runs the server, at ${err.localAddress}.`
         : "You signed in, but your browser didn't keep the session. Check that it allows cookies for this site, " +
           "then sign in again.",
       tone: "error",
     };
   }
-  if (!(err instanceof ApiError)) return { message: fallback, tone: "error" };
-
-  // 502 and 504 come from whatever sits in front of the server (the dev proxy, a load balancer)
-  // when the server is down or slow, and mean the same as 503: not the person's doing.
-  if (err.status === 502 || err.status === 503 || err.status === 504) {
-    return { message: "The server can't answer right now. Try again shortly.", tone: "notice" };
+  if (isOutage(err)) {
+    return {
+      // With no answer at all, the client's own sentence ("Can't reach the server.") is the accurate one.
+      message: err.status === 0 ? err.message : "The server can't answer right now. Try again shortly.",
+      tone: "notice",
+    };
   }
+  if (!(err instanceof ApiError)) return { message: fallback, tone: "error" };
 
   switch (err.code) {
     case "invalid_credentials":
