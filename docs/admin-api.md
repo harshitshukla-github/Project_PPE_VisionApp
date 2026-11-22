@@ -591,8 +591,8 @@ out for everything.
 
 Supervisors are meant to review checks, `NEEDS_REVIEW` above all
 (AGENTS.md §15). Checks aren't stored yet, so there is nothing to review in
-this phase. Phase 5 stores every check, with the worker's photo, and gets
-its own contract:
+this phase. Phase 5 stores every check, with the worker's photo, and has its
+own contract, [`docs/checks-api.md`](checks-api.md) (draft for review):
 
 - a checks list, filtered by site, worker, job, verdict and date
 - a check's detail, with the photo and Gemini's findings
