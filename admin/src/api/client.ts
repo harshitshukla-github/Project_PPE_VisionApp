@@ -63,11 +63,17 @@ export class ApiError extends Error {
   field?: string;
   /** On `409 version_conflict`: the job as it is now. */
   current?: Job;
+  /**
+   * A write that may have been carried out although no proper answer came back
+   * (it timed out, or a proxy answered `502`/`504`). The message says so, and
+   * the person should look before doing it again.
+   */
+  unsure: boolean;
 
   constructor(
     status: number,
     message: string,
-    extra: { code?: string; retryAfterS?: number; field?: string; current?: Job } = {},
+    extra: { code?: string; retryAfterS?: number; field?: string; current?: Job; unsure?: boolean } = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -76,6 +82,7 @@ export class ApiError extends Error {
     this.retryAfterS = extra.retryAfterS;
     this.field = extra.field;
     this.current = extra.current;
+    this.unsure = extra.unsure ?? false;
   }
 }
 
@@ -198,7 +205,7 @@ async function request<T>(
     } catch {
       throw new ApiError(0, "Can't reach the server.");
     }
-    if (!response.ok) error = await toApiError(response);
+    if (!response.ok) error = maybeDone(method, await toApiError(response));
     else if (response.status !== 204) result = (await response.json()) as T;
   } catch (err) {
     // Anything that went wrong because the timer ran out is the timeout, whatever was thrown.
@@ -239,11 +246,28 @@ export const REQUEST_TIMEOUT_MS = 20_000;
  * the person is told to look before doing it again.
  */
 function timedOut(method: string): ApiError {
+  return method === "GET"
+    ? new ApiError(0, "The server didn't answer in time.")
+    : new ApiError(
+        0,
+        "The server didn't answer in time, so this may or may not have been saved. Reload the page to check.",
+        { unsure: true },
+      );
+}
+
+/**
+ * A `502` or `504` is the proxy in front giving up on the server, which may
+ * still have done the work. On a write, say so: "try again" could repeat a
+ * change that went through, and a repeated password change fails on the old
+ * password. A `503` is our own server refusing, so nothing was done, and it is
+ * left as it is.
+ */
+function maybeDone(method: string, error: ApiError): ApiError {
+  if (method === "GET" || (error.status !== 502 && error.status !== 504)) return error;
   return new ApiError(
-    0,
-    method === "GET"
-      ? "The server didn't answer in time."
-      : "The server didn't answer in time, so this may or may not have been saved. Reload the page to check.",
+    error.status,
+    "The server didn't answer properly, so this may or may not have been saved. Reload the page to check.",
+    { code: error.code, unsure: true },
   );
 }
 

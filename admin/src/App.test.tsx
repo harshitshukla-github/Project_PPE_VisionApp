@@ -156,7 +156,8 @@ describe("login page", () => {
   it("503: amber 'try again shortly', not a red error", async () => {
     mockApi({
       "GET /api/v1/auth/me": NOT_SIGNED_IN,
-      "POST /api/v1/auth/login": () => fail(503, { detail: "No database.", code: "auth_unavailable" }),
+      "POST /api/v1/auth/login": () =>
+        fail(503, { detail: "Sign-in is temporarily unavailable. Try again shortly.", code: "auth_unavailable" }),
     });
     renderApp();
 
@@ -626,6 +627,19 @@ describe("changing your own password later", () => {
     expect(screen.getByRole("heading", { name: "Change your password" })).toBeInTheDocument();
   });
 
+  it("a 504 on the save says it may or may not have been saved, not just 'try again'", async () => {
+    // A retry after a change that did go through would fail on the old password.
+    openAs(ADMIN_SESSION, () => new Response("Gateway Timeout", { status: 504, statusText: "Gateway Timeout" }));
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "my-old-password-1", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent("may or may not have been saved");
+    expect(screen.queryByText(/Try again shortly/)).toBeNull();
+  });
+
   it("shows the server's reason for a weak new password", async () => {
     openAs(ADMIN_SESSION, () => fail(422, { detail: "A password can't be your email address.", code: "weak_password" }));
     const user = userEvent.setup();
@@ -739,7 +753,7 @@ describe("when the server is down as the page loads", () => {
   });
 
   it.each([
-    ["503", () => fail(503, { detail: "No database configured.", code: "auth_unavailable" })],
+    ["503", () => fail(503, { detail: "Sign-in is temporarily unavailable. Try again shortly.", code: "auth_unavailable" })],
     ["504", () => new Response("Gateway Timeout", { status: 504, statusText: "Gateway Timeout" })],
   ])("a %s is the same screen", async (_status, answer) => {
     mockApi({ "GET /api/v1/auth/me": answer });
@@ -749,6 +763,23 @@ describe("when the server is down as the page loads", () => {
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.getByTestId("problem-notice")).toHaveTextContent("Try again shortly");
     expect(screen.queryByLabelText("Email")).toBeNull();
+  });
+
+  it("with no database configured, gives the server's reason instead of 'try again shortly'", async () => {
+    // A lasting fault, not a moment: "try again shortly" would send the person round in circles.
+    mockApi({
+      "GET /api/v1/auth/me": () =>
+        fail(503, { detail: "Sign-in is unavailable: the server has no database configured.", code: "auth_unavailable" }),
+    });
+
+    renderApp();
+
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent(
+      "Sign-in is unavailable: the server has no database configured.",
+    );
+    expect(screen.queryByText(/Try again shortly/)).toBeNull();
+    expect(screen.queryByText(/in a moment/)).toBeNull(); // the page's own words don't promise it either
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
 

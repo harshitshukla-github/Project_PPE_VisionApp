@@ -129,7 +129,10 @@ npm run build
   the stand-in are both typed against it.
 - `src/api/problems.ts` turns an error `code` into words. An outage (`isOutage`:
   no answer at all, or a `502`/`503`/`504` from the server or a proxy in front of
-  it) is an amber notice, never a red error: it isn't the person's doing.
+  it) is an amber notice, never a red error: it isn't the person's doing. A
+  `502`/`504` on a write says it may or may not have been saved (the proxy gave
+  up, the server may not have), and a `503 auth_unavailable` shows the server's
+  own reason, so "no database configured" isn't hidden behind "try again".
 - `src/auth/AuthContext.tsx` holds who is signed in. `GET /auth/me` runs on
   every page load; until it answers, the app shows a spinner, not the login page.
   On an outage the app says so and offers "Try again" instead of showing a

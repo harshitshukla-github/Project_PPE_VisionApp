@@ -66,9 +66,27 @@ describe("problemFrom (auth-api §3, by `code`)", () => {
   });
 
   it("any 503 is an amber 'try again shortly' notice", () => {
-    const problem = problemFrom(new ApiError(503, "no database", { code: "auth_unavailable" }), "x");
+    const problem = problemFrom(new ApiError(503, "Service Unavailable"), "x");
     expect(problem.tone).toBe("notice");
     expect(problem.message).toContain("Try again shortly");
+  });
+
+  it.each([
+    // The backend's two sentences (src/auth/errors.py, src/auth/deps.py): a moment, or not at all.
+    ["Sign-in is temporarily unavailable. Try again shortly."],
+    ["Sign-in is unavailable: the server has no database configured."],
+  ])("503 auth_unavailable keeps the server's own reason, in amber: %s", (detail) => {
+    const problem = problemFrom(new ApiError(503, detail, { code: "auth_unavailable" }), "x");
+
+    expect(problem).toEqual({ message: detail, tone: "notice" });
+  });
+
+  it("a 502 or 504 on a save that may have gone through keeps the client's 'may or may not have been saved'", () => {
+    const err = new ApiError(504, "The server didn't answer properly, so this may or may not have been saved.", {
+      unsure: true,
+    });
+
+    expect(problemFrom(err, "x")).toEqual({ message: err.message, tone: "notice" });
   });
 
   it.each([
