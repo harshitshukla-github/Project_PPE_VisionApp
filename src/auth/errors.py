@@ -43,12 +43,19 @@ async def auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:
     return exc.to_response()
 
 
+DATABASE_UNAVAILABLE = "The server can't reach its database right now. Try again shortly."
+
+
 async def database_unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
-    """A database connection failure during a request. Only login reads the
-    database per request; the job matrix handles its own outages."""
-    return AuthError(
-        503, "auth_unavailable", "Sign-in is temporarily unavailable. Try again shortly."
-    ).to_response()
+    """A database connection failure during a request.
+
+    Every signed-in request reads the database to check its session, so this
+    answers sign-in and every dashboard page alike: the sentence names the
+    database, not sign-in, and reads right on either. The code stays
+    ``auth_unavailable`` (docs/auth-api.md §3): the server couldn't check the
+    login. The job matrix handles its own outages.
+    """
+    return AuthError(503, "auth_unavailable", DATABASE_UNAVAILABLE).to_response()
 
 
 def human_duration(seconds: float) -> str:
