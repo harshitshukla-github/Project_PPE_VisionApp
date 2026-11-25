@@ -55,6 +55,18 @@ export function isOutage(err: unknown): err is ApiError {
   return err instanceof ApiError && OUTAGE_STATUSES.has(err.status);
 }
 
+/**
+ * Outages whose own message is more accurate than "try again shortly":
+ * - no answer at all: the client's sentence ("Can't reach the server.", or that it timed out);
+ * - a write that may have gone through (`unsure`): "may or may not have been saved";
+ * - `503 auth_unavailable`: the server's sentence, which tells a passing fault
+ *   from a server with no database at all, where trying again won't help.
+ *   Shown, not branched on: the `code` decides (auth-api §3).
+ */
+function ownWords(err: ApiError): boolean {
+  return err.status === 0 || err.unsure || (err.status === 503 && err.code === "auth_unavailable");
+}
+
 /** "14 minutes", "1 minute", "40 seconds" — rounded up so it never says "0 minutes". */
 export function formatWait(seconds: number): string {
   if (seconds < 60) {
@@ -79,8 +91,7 @@ export function problemFrom(err: unknown, fallback: string): Problem {
   }
   if (isOutage(err)) {
     return {
-      // With no answer at all, the client's own sentence ("Can't reach the server.") is the accurate one.
-      message: err.status === 0 ? err.message : "The server can't answer right now. Try again shortly.",
+      message: ownWords(err) ? err.message : "The server can't answer right now. Try again shortly.",
       tone: "notice",
     };
   }

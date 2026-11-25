@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ADMIN_SESSION, fail, headersOf, mockApi, noContent, ok } from "../testing/mockApi";
 import {
   ApiError,
+  REQUEST_TIMEOUT_MS,
   changePassword,
   getSession,
   login,
@@ -143,6 +144,118 @@ describe("errors", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
 
     await expect(getSession()).rejects.toMatchObject({ status: 0, message: "Can't reach the server." });
+  });
+});
+
+describe("a 502 or 504 from whatever sits in front of the server", () => {
+  // The proxy gave up on the server, which may still have done the work.
+  it.each([
+    [502, "Bad Gateway"],
+    [504, "Gateway Timeout"],
+  ])("on a write (%i) says it may or may not have been saved, and is marked unsure", async (status, text) => {
+    mockApi({ "POST /api/v1/auth/password": () => new Response(text, { status, statusText: text }) });
+
+    const err = await changePassword("old", "new").catch((e: unknown) => e);
+
+    expect(err).toMatchObject({ status, unsure: true });
+    expect((err as ApiError).message).toContain("may or may not have been saved");
+  });
+
+  it("on a read is an ordinary outage: nothing was changed", async () => {
+    mockApi({ "GET /api/v1/auth/me": () => new Response("Gateway Timeout", { status: 504, statusText: "Gateway Timeout" }) });
+
+    const err = await getSession().catch((e: unknown) => e);
+
+    expect(err).toMatchObject({ status: 504, unsure: false });
+  });
+
+  it("a 503 on a write is not unsure: our server refused it, so nothing was saved", async () => {
+    mockApi({
+      "POST /api/v1/auth/password": () =>
+        fail(503, { detail: "The server can't reach its database right now. Try again shortly.", code: "auth_unavailable" }),
+    });
+
+    const err = await changePassword("old", "new").catch((e: unknown) => e);
+
+    expect(err).toMatchObject({ status: 503, unsure: false, code: "auth_unavailable" });
+  });
+
+  it.each([
+    [502, "Bad Gateway"],
+    [504, "Gateway Timeout"],
+  ])("on sign-in (%i) is an ordinary outage: signing in saves nothing, and trying again is harmless", async (status, text) => {
+    mockApi({ "POST /api/v1/auth/login": () => new Response(text, { status, statusText: text }) });
+
+    const err = await login("admin@example.com", "pw").catch((e: unknown) => e);
+
+    expect(err).toMatchObject({ status, unsure: false });
+    expect((err as ApiError).message).not.toContain("may or may not have been saved");
+  });
+});
+
+describe("a server that takes the request and never answers", () => {
+  /** A fetch that hangs until it is aborted, as a stuck server or proxy does. */
+  function hangingFetch() {
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted.", "AbortError")));
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("a read gives up after REQUEST_TIMEOUT_MS, as an outage (status 0) that says what happened", async () => {
+    hangingFetch();
+    let settled = false;
+    const result = getSession().finally(() => (settled = true));
+    const rejected = expect(result).rejects.toMatchObject({ status: 0, message: "The server didn't answer in time." });
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
+    expect(settled).toBe(false); // not a moment sooner
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+  });
+
+  it("a write that times out says it may or may not have been saved: the server may have done it", async () => {
+    hangingFetch();
+    const failed = changePassword("old", "new").catch((err: unknown) => err);
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+
+    const err = await failed;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 0, unsure: true });
+    expect((err as ApiError).message).toContain("may or may not have been saved");
+  });
+
+  it("a read that times out is not marked unsure: reading again is harmless", async () => {
+    hangingFetch();
+    const failed = getSession().catch((err: unknown) => err);
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+
+    expect(await failed).toMatchObject({ status: 0, unsure: false });
+  });
+
+  it("a sign-in that times out says only that it timed out: it saves nothing", async () => {
+    hangingFetch();
+    const failed = login("admin@example.com", "pw").catch((err: unknown) => err);
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+
+    expect(await failed).toMatchObject({ status: 0, unsure: false, message: "The server didn't answer in time." });
+  });
+
+  it("an answer in time leaves no timer running", async () => {
+    mockApi({ "GET /api/v1/auth/me": () => ok(ADMIN_SESSION) });
+
+    await getSession();
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
