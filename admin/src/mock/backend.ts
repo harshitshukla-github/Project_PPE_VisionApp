@@ -69,10 +69,11 @@ const SETTING_DEFINITIONS: SettingDefinition[] = [
     name: "worker_auth", type: "choice", min: null, max: null, step: null, choices: ["optional", "required"], confirm: true,
     description: "Whether a check needs a worker login (auth-api.md §5).", default: "optional",
   },
-  // docs/checks-api.md §7. Whether these ask before saving isn't in the contract; the two periods
-  // do here, because shortening one deletes photos.
+  // docs/checks-api.md §7. Whether these ask before saving isn't in the contract. store_photos does,
+  // as in the backend (src/admin/runtime.py, #39); the two periods do here too, because shortening
+  // one deletes photos.
   {
-    name: "store_photos", type: "boolean", min: null, max: null, step: null, choices: null, confirm: false,
+    name: "store_photos", type: "boolean", min: null, max: null, step: null, choices: null, confirm: true,
     description: "Keep the photo with each stored check. Off: checks are stored without photos; nothing already stored is deleted.",
     default: true,
   },
