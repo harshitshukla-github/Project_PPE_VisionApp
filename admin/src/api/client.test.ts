@@ -172,12 +172,24 @@ describe("a 502 or 504 from whatever sits in front of the server", () => {
   it("a 503 on a write is not unsure: our server refused it, so nothing was saved", async () => {
     mockApi({
       "POST /api/v1/auth/password": () =>
-        fail(503, { detail: "Sign-in is temporarily unavailable. Try again shortly.", code: "auth_unavailable" }),
+        fail(503, { detail: "The server can't reach its database right now. Try again shortly.", code: "auth_unavailable" }),
     });
 
     const err = await changePassword("old", "new").catch((e: unknown) => e);
 
     expect(err).toMatchObject({ status: 503, unsure: false, code: "auth_unavailable" });
+  });
+
+  it.each([
+    [502, "Bad Gateway"],
+    [504, "Gateway Timeout"],
+  ])("on sign-in (%i) is an ordinary outage: signing in saves nothing, and trying again is harmless", async (status, text) => {
+    mockApi({ "POST /api/v1/auth/login": () => new Response(text, { status, statusText: text }) });
+
+    const err = await login("admin@example.com", "pw").catch((e: unknown) => e);
+
+    expect(err).toMatchObject({ status, unsure: false });
+    expect((err as ApiError).message).not.toContain("may or may not have been saved");
   });
 });
 
@@ -227,6 +239,15 @@ describe("a server that takes the request and never answers", () => {
     await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
 
     expect(await failed).toMatchObject({ status: 0, unsure: false });
+  });
+
+  it("a sign-in that times out says only that it timed out: it saves nothing", async () => {
+    hangingFetch();
+    const failed = login("admin@example.com", "pw").catch((err: unknown) => err);
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+
+    expect(await failed).toMatchObject({ status: 0, unsure: false, message: "The server didn't answer in time." });
   });
 
   it("an answer in time leaves no timer running", async () => {

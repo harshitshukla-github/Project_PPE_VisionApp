@@ -73,7 +73,7 @@ describe("problemFrom (auth-api §3, by `code`)", () => {
 
   it.each([
     // The backend's two sentences (src/auth/errors.py, src/auth/deps.py): a moment, or not at all.
-    ["Sign-in is temporarily unavailable. Try again shortly."],
+    ["The server can't reach its database right now. Try again shortly."],
     ["Sign-in is unavailable: the server has no database configured."],
   ])("503 auth_unavailable keeps the server's own reason, in amber: %s", (detail) => {
     const problem = problemFrom(new ApiError(503, detail, { code: "auth_unavailable" }), "x");

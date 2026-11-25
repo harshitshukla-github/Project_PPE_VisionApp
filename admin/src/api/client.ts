@@ -173,6 +173,12 @@ interface RequestOptions {
    * session at all, where "no" is an answer and not a session ending.
    */
   quiet?: boolean;
+  /**
+   * A non-GET that changes nothing worth checking on, so it is safe to send
+   * again after a timeout or a `502`/`504`: signing in. Its failures say "try
+   * again", not "may or may not have been saved".
+   */
+  repeatable?: boolean;
 }
 
 async function request<T>(
@@ -186,6 +192,8 @@ async function request<T>(
   if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
 
   const send = await transportFor(path);
+  // Whether a failure without a proper answer could have left a change behind.
+  const mayHaveChanged = method !== "GET" && !options.repeatable;
   // A server (or proxy) that takes the request and never answers would otherwise leave the page
   // on "Loading…" or "Saving…" for ever. The timer covers reading the answer too.
   const controller = new AbortController();
@@ -205,12 +213,12 @@ async function request<T>(
     } catch {
       throw new ApiError(0, "Can't reach the server.");
     }
-    if (!response.ok) error = maybeDone(method, await toApiError(response));
+    if (!response.ok) error = maybeDone(mayHaveChanged, await toApiError(response));
     else if (response.status !== 204) result = (await response.json()) as T;
   } catch (err) {
     // Anything that went wrong because the timer ran out is the timeout, whatever was thrown.
     // Otherwise it is passed on as it is: an answer that isn't JSON stays a SyntaxError.
-    if (controller.signal.aborted) throw timedOut(method);
+    if (controller.signal.aborted) throw timedOut(mayHaveChanged);
     throw err;
   } finally {
     clearTimeout(timer);
@@ -241,12 +249,12 @@ async function request<T>(
 export const REQUEST_TIMEOUT_MS = 20_000;
 
 /**
- * Status 0, like no answer at all (`isOutage`). A read can simply be tried
- * again. A write may have been carried out before the server went quiet, so
- * the person is told to look before doing it again.
+ * Status 0, like no answer at all (`isOutage`). A read, or a sign-in, can
+ * simply be tried again. A write may have been carried out before the server
+ * went quiet, so the person is told to look before doing it again.
  */
-function timedOut(method: string): ApiError {
-  return method === "GET"
+function timedOut(mayHaveChanged: boolean): ApiError {
+  return !mayHaveChanged
     ? new ApiError(0, "The server didn't answer in time.")
     : new ApiError(
         0,
@@ -260,10 +268,10 @@ function timedOut(method: string): ApiError {
  * still have done the work. On a write, say so: "try again" could repeat a
  * change that went through, and a repeated password change fails on the old
  * password. A `503` is our own server refusing, so nothing was done, and it is
- * left as it is.
+ * left as it is; so are reads and sign-in, which change nothing to check on.
  */
-function maybeDone(method: string, error: ApiError): ApiError {
-  if (method === "GET" || (error.status !== 502 && error.status !== 504)) return error;
+function maybeDone(mayHaveChanged: boolean, error: ApiError): ApiError {
+  if (!mayHaveChanged || (error.status !== 502 && error.status !== 504)) return error;
   return new ApiError(
     error.status,
     "The server didn't answer properly, so this may or may not have been saved. Reload the page to check.",
@@ -308,7 +316,10 @@ export async function getSession(options: { quiet?: boolean } = {}): Promise<Ses
 
 /** `POST /auth/login`. The session cookie is set by the server. */
 export async function login(email: string, password: string): Promise<SessionResponse> {
-  const session = withSite(await request<SessionResponse>("POST", "/auth/login", { email, password }));
+  // Signing in saves nothing, so a timeout or a 502/504 here is a plain "try again".
+  const session = withSite(
+    await request<SessionResponse>("POST", "/auth/login", { email, password }, { repeatable: true }),
+  );
   csrfToken = session.csrf_token;
   currentUser = session.user;
   return session;

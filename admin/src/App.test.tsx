@@ -157,7 +157,7 @@ describe("login page", () => {
     mockApi({
       "GET /api/v1/auth/me": NOT_SIGNED_IN,
       "POST /api/v1/auth/login": () =>
-        fail(503, { detail: "Sign-in is temporarily unavailable. Try again shortly.", code: "auth_unavailable" }),
+        fail(503, { detail: "The server can't reach its database right now. Try again shortly.", code: "auth_unavailable" }),
     });
     renderApp();
 
@@ -165,6 +165,21 @@ describe("login page", () => {
 
     expect(await screen.findByTestId("problem-notice")).toHaveTextContent(/Try again shortly/);
     expect(screen.queryByTestId("problem-error")).toBeNull();
+  });
+
+  it("a 504 on sign-in says 'try again shortly', not 'may or may not have been saved': it saves nothing", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": NOT_SIGNED_IN,
+      "POST /api/v1/auth/login": () => new Response("Gateway Timeout", { status: 504, statusText: "Gateway Timeout" }),
+    });
+    renderApp();
+
+    await signInWith("admin@example.com", "correct horse battery staple");
+
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent(
+      "The server can't answer right now. Try again shortly.",
+    );
+    expect(screen.queryByText(/may or may not have been saved/)).toBeNull();
   });
 });
 
@@ -510,9 +525,11 @@ describe("the admin API: real by default, a stand-in only on request", () => {
     renderApp();
     await screen.findByRole("heading", { name: "Job matrix" });
 
-    const asked = fetchMock.mock.calls.map(([url]) => url);
-    expect(asked).toContain("/api/v1/admin/items");
-    expect(asked).toContain("/api/v1/admin/jobs");
+    // The heading comes first, and the page asks for jobs only once items have arrived, so wait
+    // for the requests rather than checking the moment the heading appears (it was flaky).
+    const asked = () => fetchMock.mock.calls.map(([url]) => url);
+    await waitFor(() => expect(asked()).toContain("/api/v1/admin/items"));
+    await waitFor(() => expect(asked()).toContain("/api/v1/admin/jobs"));
   });
 });
 
@@ -753,7 +770,7 @@ describe("when the server is down as the page loads", () => {
   });
 
   it.each([
-    ["503", () => fail(503, { detail: "Sign-in is temporarily unavailable. Try again shortly.", code: "auth_unavailable" })],
+    ["503", () => fail(503, { detail: "The server can't reach its database right now. Try again shortly.", code: "auth_unavailable" })],
     ["504", () => new Response("Gateway Timeout", { status: 504, statusText: "Gateway Timeout" })],
   ])("a %s is the same screen", async (_status, answer) => {
     mockApi({ "GET /api/v1/auth/me": answer });

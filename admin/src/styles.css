@@ -223,6 +223,7 @@ button.link {
    and the link for the page you're on is marked the way the navigation marks it. */
 .who a {
   color: var(--accent);
+  font-weight: 600; /* the same as Sign out, a button */
   text-decoration: none;
 }
 
@@ -231,8 +232,13 @@ button.link {
   text-decoration: underline;
 }
 
+/* The current page is marked as the navigation marks it, with a background, not a heavier weight.
+   The negative margin keeps the padding from moving the text. */
 .who a[aria-current="page"] {
-  font-weight: 600;
+  margin: -0.2rem -0.5rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--surface-2);
+  border-radius: 0.4rem;
 }
 
 /* A page that is one short form (Change password): as wide as the form needs. */
