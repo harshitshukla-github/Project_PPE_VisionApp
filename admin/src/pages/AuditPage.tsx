@@ -1,7 +1,7 @@
 import { Fragment, useState, type FormEvent } from "react";
 
 import { getAudit, getSites } from "../api/client";
-import { startOfDay, startOfNextDay } from "../dates";
+import { isUsableDay, startOfDay, startOfNextDay } from "../dates";
 import { ProblemBanner } from "../components/ProblemBanner";
 import { Loading, Pager, Time } from "../components/widgets";
 import { usePages, useResource } from "../hooks/useResource";
@@ -28,6 +28,10 @@ interface Filters {
 }
 
 const NO_FILTERS: Filters = { action: "", target: "", actor: "", site: "", from: "", to: "" };
+
+// The years `isUsableDay` accepts, so the date picker offers no others.
+const DATE_MIN = "1900-01-01";
+const DATE_MAX = "9999-12-31";
 
 
 function Details({ label, value }: { label: string; value: Record<string, unknown> | null }) {
@@ -65,8 +69,17 @@ export function AuditPage() {
     [applied],
   );
 
+  // A date box that has something in it but not yet a whole day (see dates.ts): said so, not applied.
+  const [badDates, setBadDates] = useState<{ from: boolean; to: boolean }>({ from: false, to: false });
+
   function apply(event: FormEvent) {
     event.preventDefault();
+    const bad = {
+      from: draft.from !== "" && !isUsableDay(draft.from),
+      to: draft.to !== "" && !isUsableDay(draft.to),
+    };
+    setBadDates(bad);
+    if (bad.from || bad.to) return;
     setApplied(draft);
     setOpen(null);
   }
@@ -76,7 +89,9 @@ export function AuditPage() {
       <h1>Audit log</h1>
       <p className="hint">Who changed what, newest first. The filters match exactly.</p>
 
-      <form className="toolbar" onSubmit={apply} aria-label="Filters">
+      {/* noValidate: the dates' min and max only bound the picker; a day out of range gets the
+          note below, the same in every browser, rather than each browser's own bubble. */}
+      <form className="toolbar" onSubmit={apply} aria-label="Filters" noValidate>
         <label>
           Action
           <select value={draft.action} onChange={(e) => setDraft({ ...draft, action: e.target.value })}>
@@ -109,11 +124,27 @@ export function AuditPage() {
         </label>
         <label>
           From
-          <input type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
+          <input
+            type="date"
+            min={DATE_MIN}
+            max={DATE_MAX}
+            value={draft.from}
+            onChange={(e) => setDraft({ ...draft, from: e.target.value })}
+            aria-invalid={badDates.from || undefined}
+            aria-describedby={badDates.from ? "audit-date-error" : undefined}
+          />
         </label>
         <label>
           To
-          <input type="date" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
+          <input
+            type="date"
+            min={DATE_MIN}
+            max={DATE_MAX}
+            value={draft.to}
+            onChange={(e) => setDraft({ ...draft, to: e.target.value })}
+            aria-invalid={badDates.to || undefined}
+            aria-describedby={badDates.to ? "audit-date-error" : undefined}
+          />
         </label>
         <button type="submit">Apply</button>
         <button
@@ -123,11 +154,17 @@ export function AuditPage() {
             setDraft(NO_FILTERS);
             setApplied(NO_FILTERS);
             setOpen(null);
+            setBadDates({ from: false, to: false });
           }}
         >
           Clear
         </button>
       </form>
+      {(badDates.from || badDates.to) && (
+        <p className="field-error" id="audit-date-error" role="alert">
+          Finish typing the date, such as 2026-11-02.
+        </p>
+      )}
 
       {list.problem && <ProblemBanner problem={list.problem} />}
       <Loading loading={list.loading} hasData={!!list.page} />

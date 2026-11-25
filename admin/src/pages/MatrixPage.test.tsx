@@ -75,6 +75,15 @@ describe("MatrixPage", () => {
       expect(screen.getAllByText("Gemini only")).toHaveLength(3);
     });
 
+    it("'No AP50' says why on hover: the model has no figures, but the detector still checks the item", async () => {
+      for (const item of backend.state.items) item.detector_ap50 = null;
+      await open();
+
+      const tag = within(header("Hardhat")).getByText("No AP50");
+      expect(tag).toHaveAttribute("title", expect.stringContaining("no accuracy figures"));
+      expect(tag).toHaveAttribute("title", expect.stringContaining("still checks"));
+    });
+
     it("shows the figure when there is one", async () => {
       backend.state.items.find((i) => i.key === "hardhat")!.detector_ap50 = 0.9;
       await open();

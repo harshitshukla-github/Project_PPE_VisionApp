@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 
 import { ApiError } from "../api/client";
 import { problemFrom, type Problem } from "../api/problems";
@@ -75,20 +75,10 @@ export function ChangePasswordPage({ voluntary = false }: { voluntary?: boolean 
     }
   }
 
-  if (voluntary && done) {
-    return (
-      <main className="card" data-testid="password-changed">
-        <h1>Password changed</h1>
-        <p>You stay signed in here. Anywhere else you were signed in has been signed out.</p>
-        <p>
-          <a href={`#${DEFAULT_PATH}`}>Back to the dashboard</a>
-        </p>
-      </main>
-    );
-  }
+  if (voluntary && done) return <PasswordChanged />;
 
   return (
-    <main className="card">
+    <Frame voluntary={voluntary}>
       <h1>{voluntary ? "Change your password" : "Choose a new password"}</h1>
       <p className="hint">
         {voluntary ? (
@@ -157,6 +147,32 @@ export function ChangePasswordPage({ voluntary = false }: { voluntary?: boolean 
           Sign out
         </button>
       )}
-    </main>
+    </Frame>
+  );
+}
+
+/**
+ * Forced, the page stands alone, like the sign-in page: its own <main>, as a
+ * card. Voluntary, it is a page inside the dashboard's frame, which already
+ * has the <main>, and it is as wide as the form needs, not a screen-filling card.
+ */
+function Frame({ voluntary, children }: { voluntary: boolean; children: ReactNode }) {
+  return voluntary ? <section className="page narrow">{children}</section> : <main className="card">{children}</main>;
+}
+
+/** Said once the voluntary change is done. Focus moves to its heading, so a screen reader announces it. */
+function PasswordChanged() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus(), []);
+  return (
+    <section className="page narrow" data-testid="password-changed">
+      <h1 ref={heading} tabIndex={-1}>
+        Password changed
+      </h1>
+      <p>You stay signed in here. Anywhere else you were signed in has been signed out.</p>
+      <p>
+        <a href={`#${DEFAULT_PATH}`}>Back to the dashboard</a>
+      </p>
+    </section>
   );
 }

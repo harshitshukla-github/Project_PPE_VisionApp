@@ -119,12 +119,20 @@ npm run build
   to change when the mock goes. The CSRF token is kept in memory (never
   `localStorage`), sent as `X-CSRF-Token` on every write, refreshed from
   `GET /auth/me` and the write retried once on `403 csrf_failed`. A
-  `401 not_authenticated` anywhere returns the user to the login page.
+  `401 not_authenticated` anywhere returns the user to the login page. A
+  request gives up after 20 seconds (`REQUEST_TIMEOUT_MS`) as an outage, so a
+  hung server ends in a message, not a spinner; a write that timed out says it
+  may or may not have been saved.
+- Each page is drawn inside an error boundary (`src/components/ErrorBoundary.tsx`):
+  a page that breaks says so in place, and the navigation still works.
 - `src/api/types.ts` is the contract's shapes written down once. The pages and
   the stand-in are both typed against it.
 - `src/api/problems.ts` turns an error `code` into words. An outage (`isOutage`:
   no answer at all, or a `502`/`503`/`504` from the server or a proxy in front of
-  it) is an amber notice, never a red error: it isn't the person's doing.
+  it) is an amber notice, never a red error: it isn't the person's doing. A
+  `502`/`504` on a write says it may or may not have been saved (the proxy gave
+  up, the server may not have), and a `503 auth_unavailable` shows the server's
+  own reason, so "no database configured" isn't hidden behind "try again".
 - `src/auth/AuthContext.tsx` holds who is signed in. `GET /auth/me` runs on
   every page load; until it answers, the app shows a spinner, not the login page.
   On an outage the app says so and offers "Try again" instead of showing a

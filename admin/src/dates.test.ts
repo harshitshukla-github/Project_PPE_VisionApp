@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startOfDay, startOfNextDay } from "./dates";
+import { isUsableDay, startOfDay, startOfNextDay } from "./dates";
 
 const ORIGINAL_TZ = process.env.TZ;
 afterEach(() => {
@@ -66,5 +66,25 @@ describe("calendar days in the person's own timezone", () => {
   it("is undefined when no day is picked", () => {
     expect(startOfDay("")).toBeUndefined();
     expect(startOfNextDay("")).toBeUndefined();
+  });
+});
+
+describe("what a date box can hand over that isn't a day anyone means", () => {
+  it("a half-typed year (2026 as far as '0026') is not a day yet, not 1926", () => {
+    // `new Date(26, …)` would be 1926: years 0–99 are read as 19xx.
+    expect(isUsableDay("0026-11-02")).toBe(false);
+    expect(startOfDay("0026-11-02")).toBeUndefined();
+    expect(startOfNextDay("0026-11-02")).toBeUndefined();
+  });
+
+  it("the last day a date box allows (275760-09-13) gives no day, instead of throwing", () => {
+    expect(isUsableDay("275760-09-13")).toBe(false);
+    expect(() => startOfNextDay("275760-09-13")).not.toThrow();
+    expect(startOfNextDay("275760-09-13")).toBeUndefined();
+  });
+
+  it("an ordinary day is usable, and an empty box is not a day at all", () => {
+    expect(isUsableDay("2026-11-02")).toBe(true);
+    expect(isUsableDay("")).toBe(false);
   });
 });

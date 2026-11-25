@@ -63,11 +63,17 @@ export class ApiError extends Error {
   field?: string;
   /** On `409 version_conflict`: the job as it is now. */
   current?: Job;
+  /**
+   * A write that may have been carried out although no proper answer came back
+   * (it timed out, or a proxy answered `502`/`504`). The message says so, and
+   * the person should look before doing it again.
+   */
+  unsure: boolean;
 
   constructor(
     status: number,
     message: string,
-    extra: { code?: string; retryAfterS?: number; field?: string; current?: Job } = {},
+    extra: { code?: string; retryAfterS?: number; field?: string; current?: Job; unsure?: boolean } = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -76,6 +82,7 @@ export class ApiError extends Error {
     this.retryAfterS = extra.retryAfterS;
     this.field = extra.field;
     this.current = extra.current;
+    this.unsure = extra.unsure ?? false;
   }
 }
 
@@ -166,6 +173,12 @@ interface RequestOptions {
    * session at all, where "no" is an answer and not a session ending.
    */
   quiet?: boolean;
+  /**
+   * A non-GET that changes nothing worth checking on, so it is safe to send
+   * again after a timeout or a `502`/`504`: signing in. Its failures say "try
+   * again", not "may or may not have been saved".
+   */
+  repeatable?: boolean;
 }
 
 async function request<T>(
@@ -179,20 +192,39 @@ async function request<T>(
   if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
 
   const send = await transportFor(path);
-  let response: Response;
+  // Whether a failure without a proper answer could have left a change behind.
+  const mayHaveChanged = method !== "GET" && !options.repeatable;
+  // A server (or proxy) that takes the request and never answers would otherwise leave the page
+  // on "Loading…" or "Saving…" for ever. The timer covers reading the answer too.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let error: ApiError | undefined;
+  let result: T | undefined;
   try {
-    response = await send(`${API}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      credentials: "same-origin",
-    });
-  } catch {
-    throw new ApiError(0, "Can't reach the server.");
+    let response: Response;
+    try {
+      response = await send(`${API}${path}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+    } catch {
+      throw new ApiError(0, "Can't reach the server.");
+    }
+    if (!response.ok) error = maybeDone(mayHaveChanged, await toApiError(response));
+    else if (response.status !== 204) result = (await response.json()) as T;
+  } catch (err) {
+    // Anything that went wrong because the timer ran out is the timeout, whatever was thrown.
+    // Otherwise it is passed on as it is: an answer that isn't JSON stays a SyntaxError.
+    if (controller.signal.aborted) throw timedOut(mayHaveChanged);
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 
-  if (!response.ok) {
-    const error = await toApiError(response);
+  if (error) {
     // A write with a stale token: fetch a fresh one and try again, once
     // (auth-api §6, admin-api §2).
     if (error.code === "csrf_failed" && !options.retriedAfterCsrf) {
@@ -206,8 +238,45 @@ async function request<T>(
     }
     throw error;
   }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  return result as T;
+}
+
+/**
+ * How long a request may take before the dashboard stops waiting. Every admin
+ * call is a small database read or write, so this is generous; it only exists
+ * so a hung server ends in a message and a Try again, not a spinner.
+ */
+export const REQUEST_TIMEOUT_MS = 20_000;
+
+/**
+ * Status 0, like no answer at all (`isOutage`). A read, or a sign-in, can
+ * simply be tried again. A write may have been carried out before the server
+ * went quiet, so the person is told to look before doing it again.
+ */
+function timedOut(mayHaveChanged: boolean): ApiError {
+  return !mayHaveChanged
+    ? new ApiError(0, "The server didn't answer in time.")
+    : new ApiError(
+        0,
+        "The server didn't answer in time, so this may or may not have been saved. Reload the page to check.",
+        { unsure: true },
+      );
+}
+
+/**
+ * A `502` or `504` is the proxy in front giving up on the server, which may
+ * still have done the work. On a write, say so: "try again" could repeat a
+ * change that went through, and a repeated password change fails on the old
+ * password. A `503` is our own server refusing, so nothing was done, and it is
+ * left as it is; so are reads and sign-in, which change nothing to check on.
+ */
+function maybeDone(mayHaveChanged: boolean, error: ApiError): ApiError {
+  if (!mayHaveChanged || (error.status !== 502 && error.status !== 504)) return error;
+  return new ApiError(
+    error.status,
+    "The server didn't answer properly, so this may or may not have been saved. Reload the page to check.",
+    { code: error.code, unsure: true },
+  );
 }
 
 /** `?a=1&b=x`, leaving out anything undefined, null or empty. */
@@ -247,7 +316,10 @@ export async function getSession(options: { quiet?: boolean } = {}): Promise<Ses
 
 /** `POST /auth/login`. The session cookie is set by the server. */
 export async function login(email: string, password: string): Promise<SessionResponse> {
-  const session = withSite(await request<SessionResponse>("POST", "/auth/login", { email, password }));
+  // Signing in saves nothing, so a timeout or a 502/504 here is a plain "try again".
+  const session = withSite(
+    await request<SessionResponse>("POST", "/auth/login", { email, password }, { repeatable: true }),
+  );
   csrfToken = session.csrf_token;
   currentUser = session.user;
   return session;
