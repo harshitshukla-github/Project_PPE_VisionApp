@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import type { DashboardUser } from "./api/client";
 import { useAuth } from "./auth/AuthContext";
 import { AppShell } from "./components/AppShell";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { LoginPage } from "./pages/LoginPage";
 import { UnavailablePage } from "./pages/UnavailablePage";
@@ -54,6 +55,8 @@ function Dashboard({ user }: { user: DashboardUser }) {
 
   return (
     <AppShell user={user} path={path}>
+      {/* A key per address: a page that broke is tried afresh when it is opened again. */}
+      <ErrorBoundary key={path}>
       {path === PASSWORD_PATH ? (
         <ChangePasswordPage voluntary />
       ) : !page ? (
@@ -75,6 +78,7 @@ function Dashboard({ user }: { user: DashboardUser }) {
         // A key per page, so moving between pages starts each one fresh.
         <div key={page.path}>{page.render(user)}</div>
       )}
+      </ErrorBoundary>
     </AppShell>
   );
 }

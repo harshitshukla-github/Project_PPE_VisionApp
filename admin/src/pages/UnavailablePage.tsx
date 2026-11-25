@@ -13,10 +13,9 @@ export function UnavailablePage({ problem }: { problem: Problem }) {
     <main className="card">
       <h1>PPB Admin</h1>
       <ProblemBanner problem={problem} />
-      <p className="hint">
-        The server isn&apos;t answering, so there&apos;s no way to tell yet whether you&apos;re still signed in. Try again
-        in a moment.
-      </p>
+      {/* The banner says what went wrong; this doesn't promise it will pass, since a server with no
+          database won't come right by itself. */}
+      <p className="hint">Until the server can answer, there&apos;s no way to tell yet whether you&apos;re still signed in.</p>
       <button type="button" onClick={retry}>
         Try again
       </button>

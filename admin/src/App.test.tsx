@@ -1,9 +1,9 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import { resetClientState, setAdminTransport } from "./api/client";
+import { REQUEST_TIMEOUT_MS, resetClientState, setAdminTransport } from "./api/client";
 import { AuthProvider } from "./auth/AuthContext";
 import {
   ADMIN_SESSION,
@@ -156,7 +156,8 @@ describe("login page", () => {
   it("503: amber 'try again shortly', not a red error", async () => {
     mockApi({
       "GET /api/v1/auth/me": NOT_SIGNED_IN,
-      "POST /api/v1/auth/login": () => fail(503, { detail: "No database.", code: "auth_unavailable" }),
+      "POST /api/v1/auth/login": () =>
+        fail(503, { detail: "The server can't reach its database right now. Try again shortly.", code: "auth_unavailable" }),
     });
     renderApp();
 
@@ -164,6 +165,21 @@ describe("login page", () => {
 
     expect(await screen.findByTestId("problem-notice")).toHaveTextContent(/Try again shortly/);
     expect(screen.queryByTestId("problem-error")).toBeNull();
+  });
+
+  it("a 504 on sign-in says 'try again shortly', not 'may or may not have been saved': it saves nothing", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": NOT_SIGNED_IN,
+      "POST /api/v1/auth/login": () => new Response("Gateway Timeout", { status: 504, statusText: "Gateway Timeout" }),
+    });
+    renderApp();
+
+    await signInWith("admin@example.com", "correct horse battery staple");
+
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent(
+      "The server can't answer right now. Try again shortly.",
+    );
+    expect(screen.queryByText(/may or may not have been saved/)).toBeNull();
   });
 });
 
@@ -419,6 +435,70 @@ describe("the signed-in dashboard", () => {
 
     expect(await screen.findByTestId("mock-banner")).toHaveTextContent("Sample data");
   });
+
+  describe("a page that breaks", () => {
+    /** The Matrix, given an answer it can't draw: an AP50 that arrives as text, not a number. */
+    function openWithABrokenMatrix() {
+      const quiet = vi.spyOn(console, "error").mockImplementation(() => {}); // React reports the caught error
+      const backend = startMockBackend(ADMIN_SESSION.user);
+      backend.state.items[0].detector_ap50 = "0.909" as unknown as number;
+      mockApi({ "GET /api/v1/auth/me": () => ok(ADMIN_SESSION) });
+      window.location.hash = "#/matrix";
+      renderApp();
+      return { backend, quiet };
+    }
+
+    it("says so in place of that page, and keeps the rest of the dashboard, instead of a blank screen", async () => {
+      const { quiet } = openWithABrokenMatrix();
+
+      expect(await screen.findByRole("heading", { name: "Something went wrong on this page" })).toBeInTheDocument();
+      expect(screen.getByRole("navigation", { name: "Pages" })).toBeInTheDocument(); // the frame is still there
+      expect(screen.getByTestId("whoami")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Reload the page" })).toBeInTheDocument();
+      quiet.mockRestore();
+    });
+
+    it("another page still opens, and coming back tries the broken one again", async () => {
+      const { backend, quiet } = openWithABrokenMatrix();
+      const user = userEvent.setup();
+      await screen.findByRole("heading", { name: "Something went wrong on this page" });
+
+      await user.click(screen.getByRole("link", { name: "Workers" }));
+      expect(await screen.findByRole("heading", { name: "Workers" })).toBeInTheDocument();
+
+      backend.state.items[0].detector_ap50 = 0.909; // fixed meanwhile
+      await user.click(screen.getByRole("link", { name: "Matrix" }));
+      expect(await screen.findByRole("heading", { name: "Job matrix" })).toBeInTheDocument();
+      expect(screen.queryByText("Something went wrong on this page")).toBeNull();
+      quiet.mockRestore();
+    });
+  });
+});
+
+describe("when the server never answers", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("stops waiting after a while and offers Try again, instead of 'Loading…' for ever", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted.", "AbortError")));
+          }),
+      ),
+    );
+    renderApp();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    });
+
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByTestId("problem-notice")).toHaveTextContent("The server didn't answer in time.");
+  });
 });
 
 describe("the admin API: real by default, a stand-in only on request", () => {
@@ -445,9 +525,11 @@ describe("the admin API: real by default, a stand-in only on request", () => {
     renderApp();
     await screen.findByRole("heading", { name: "Job matrix" });
 
-    const asked = fetchMock.mock.calls.map(([url]) => url);
-    expect(asked).toContain("/api/v1/admin/items");
-    expect(asked).toContain("/api/v1/admin/jobs");
+    // The heading comes first, and the page asks for jobs only once items have arrived, so wait
+    // for the requests rather than checking the moment the heading appears (it was flaky).
+    const asked = () => fetchMock.mock.calls.map(([url]) => url);
+    await waitFor(() => expect(asked()).toContain("/api/v1/admin/items"));
+    await waitFor(() => expect(asked()).toContain("/api/v1/admin/jobs"));
   });
 });
 
@@ -503,6 +585,21 @@ describe("changing your own password later", () => {
     expect(screen.getByRole("navigation", { name: "Pages" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Change password" })).toHaveAttribute("aria-current", "page");
     expect(screen.getAllByRole("button", { name: "Sign out" })).toHaveLength(1); // the header's; the forced page's own is not shown
+    // A page inside the frame, not a second sign-in-style card: the frame's <main> is the only one.
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+  });
+
+  it("moves focus to 'Password changed', so a screen reader says it worked", async () => {
+    openAs(ADMIN_SESSION);
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "my-old-password-1", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    await screen.findByTestId("password-changed");
+    expect(screen.getByRole("heading", { name: "Password changed" })).toHaveFocus();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
   });
 
   it("changes the password with the CSRF token, says so, and offers the way back", async () => {
@@ -545,6 +642,19 @@ describe("changing your own password later", () => {
 
     expect(await screen.findByText("That isn't your current password.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+  });
+
+  it("a 504 on the save says it may or may not have been saved, not just 'try again'", async () => {
+    // A retry after a change that did go through would fail on the old password.
+    openAs(ADMIN_SESSION, () => new Response("Gateway Timeout", { status: 504, statusText: "Gateway Timeout" }));
+    const user = userEvent.setup();
+    await openPage(user);
+
+    await fill(user, "my-old-password-1", NEW, NEW);
+    await user.click(screen.getByRole("button", { name: "Save new password" }));
+
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent("may or may not have been saved");
+    expect(screen.queryByText(/Try again shortly/)).toBeNull();
   });
 
   it("shows the server's reason for a weak new password", async () => {
@@ -660,7 +770,7 @@ describe("when the server is down as the page loads", () => {
   });
 
   it.each([
-    ["503", () => fail(503, { detail: "No database configured.", code: "auth_unavailable" })],
+    ["503", () => fail(503, { detail: "The server can't reach its database right now. Try again shortly.", code: "auth_unavailable" })],
     ["504", () => new Response("Gateway Timeout", { status: 504, statusText: "Gateway Timeout" })],
   ])("a %s is the same screen", async (_status, answer) => {
     mockApi({ "GET /api/v1/auth/me": answer });
@@ -670,6 +780,23 @@ describe("when the server is down as the page loads", () => {
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.getByTestId("problem-notice")).toHaveTextContent("Try again shortly");
     expect(screen.queryByLabelText("Email")).toBeNull();
+  });
+
+  it("with no database configured, gives the server's reason instead of 'try again shortly'", async () => {
+    // A lasting fault, not a moment: "try again shortly" would send the person round in circles.
+    mockApi({
+      "GET /api/v1/auth/me": () =>
+        fail(503, { detail: "Sign-in is unavailable: the server has no database configured.", code: "auth_unavailable" }),
+    });
+
+    renderApp();
+
+    expect(await screen.findByTestId("problem-notice")).toHaveTextContent(
+      "Sign-in is unavailable: the server has no database configured.",
+    );
+    expect(screen.queryByText(/Try again shortly/)).toBeNull();
+    expect(screen.queryByText(/in a moment/)).toBeNull(); // the page's own words don't promise it either
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
 

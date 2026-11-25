@@ -126,6 +126,45 @@ describe("AuditPage", () => {
     expect(screen.queryByText("worker:LATE-1")).toBeNull();
   });
 
+  describe("a date that isn't a day anyone means", () => {
+    it("a half-typed year isn't applied as 1926: it asks for the whole date, and the list stays as it was", async () => {
+      const user = await open();
+
+      await user.type(screen.getByLabelText("From"), "0026-11-02");
+      await user.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(await screen.findByText("Finish typing the date, such as 2026-11-02.")).toBeInTheDocument();
+      expect(screen.getByLabelText("From")).toHaveAttribute("aria-invalid", "true");
+      expect(range()).toBe("1–4 of 4");
+    });
+
+    it("the last day a date box allows (275760-09-13) gets the same note, instead of blanking the page", async () => {
+      const user = await open();
+
+      await user.type(screen.getByLabelText("To"), "275760-09-13");
+      await user.click(screen.getByRole("button", { name: "Apply" }));
+
+      expect(await screen.findByText("Finish typing the date, such as 2026-11-02.")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Audit log" })).toBeInTheDocument();
+      expect(range()).toBe("1–4 of 4");
+    });
+
+    it("the note goes once the date is whole and applied", async () => {
+      const user = await open();
+      await user.type(screen.getByLabelText("From"), "0026-10-24");
+      await user.click(screen.getByRole("button", { name: "Apply" }));
+      await screen.findByText(/Finish typing the date/);
+
+      await user.clear(screen.getByLabelText("From"));
+      await user.type(screen.getByLabelText("From"), "2026-10-24");
+      await user.click(screen.getByRole("button", { name: "Apply" }));
+
+      await waitFor(() => expect(actions()).toEqual(["worker.reset_pin"]));
+      expect(screen.queryByText(/Finish typing the date/)).toBeNull();
+      expect(screen.getByLabelText("From")).not.toHaveAttribute("aria-invalid", "true");
+    });
+  });
+
   it("says when nothing matches", async () => {
     const user = await open();
     await user.type(screen.getByLabelText("Target"), "job:nothing");

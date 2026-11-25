@@ -38,8 +38,21 @@ export function Field({
 }
 
 /** A small coloured label: "Active", "Locked", "Gemini only". */
-export function Tag({ tone = "neutral", children }: { tone?: "neutral" | "good" | "warn" | "bad"; children: ReactNode }) {
-  return <span className={`tag tag-${tone}`}>{children}</span>;
+export function Tag({
+  tone = "neutral",
+  title,
+  children,
+}: {
+  tone?: "neutral" | "good" | "warn" | "bad";
+  /** Shown on hover: what the label means, when that isn't obvious. */
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span className={`tag tag-${tone}`} title={title}>
+      {children}
+    </span>
+  );
 }
 
 /** The "51–100 of 312" line with Previous and Next (docs/admin-api.md §2). */
