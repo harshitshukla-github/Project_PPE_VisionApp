@@ -133,6 +133,13 @@ class ComplianceResponse(BaseModel):
     model_used: str
     inference_time_ms: float
     gemini_invoked: bool = False
+    check_id: int | None = Field(
+        default=None,
+        description=(
+            "The stored check's ID (docs/checks-api.md §2), or null when it "
+            "couldn't be stored. The verdict is the same either way."
+        ),
+    )
 
 
 class HealthResponse(BaseModel):

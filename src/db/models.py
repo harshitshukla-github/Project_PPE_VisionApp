@@ -19,6 +19,11 @@ Admin system (Phase 3, contract in ``docs/admin-api.md``):
 - ``app_settings``  values saved from the dashboard that override ``.env``
 - ``audit_log``     every change made through the admin API or the CLI
 
+Checks and review (Phase 6, contract in ``docs/checks-api.md``):
+
+- ``checks``  every compliance check that reached a verdict, with what it was
+              judged against, its photo's state, and the review beside it
+
 Schema changes go through Alembic (``src/db/migrations``); after editing
 these classes, add a migration. ``tests/test_db_matrix.py`` fails if the
 models and the migrations disagree.
@@ -35,10 +40,13 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     String,
+    Text,
     func,
     text,
 )
@@ -217,6 +225,12 @@ class Worker(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # The photo notice (docs/checks-api.md §5): the version the worker last
+    # answered (null until they do), and whether they let their photos be
+    # kept longer for training. Photos are kept only once the notice is seen.
+    consent_seen_version: Mapped[int | None] = mapped_column(Integer)
+    training_consent: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    consent_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     site: Mapped[Site] = relationship()
     creator: Mapped[User | None] = relationship(foreign_keys=[created_by])
@@ -297,3 +311,93 @@ class AuditEntry(Base):
     before: Mapped[Any | None] = mapped_column(JSONB)
     after: Mapped[Any | None] = mapped_column(JSONB)
     ip: Mapped[str | None] = mapped_column(String(64))
+
+
+class Check(Base):
+    """One compliance check that reached a verdict (docs/checks-api.md §2).
+
+    What the app was told, plus what the verdict was judged against at the
+    time: the job's requirements and the three settings that decide a
+    verdict. The matrix and the settings can change later; a review has to be
+    judged by the rules the verdict used. Rows are never deleted; photos
+    expire, and their state says so.
+    """
+
+    __tablename__ = "checks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Who and where. worker_code is the ID as the check gave it: from the
+    # login, or typed into an app without one (signed_in false), in which case
+    # it may match no worker, and worker_id and site_id are null.
+    worker_id: Mapped[int | None] = mapped_column(ForeignKey("workers.id", ondelete="SET NULL"))
+    worker_code: Mapped[str] = mapped_column(String(64))
+    signed_in: Mapped[bool] = mapped_column(Boolean)
+    # The worker's site when the check was made; it stays if they move.
+    site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id", ondelete="RESTRICT"))
+
+    # The job, as it was.
+    job_key: Mapped[str] = mapped_column(String(64))
+    job_name: Mapped[str] = mapped_column(String(100))
+    job_version: Mapped[int | None] = mapped_column(Integer)
+    required: Mapped[list[str]] = mapped_column(JSONB)
+    pending: Mapped[list[str]] = mapped_column(JSONB)
+
+    # The verdict, as the app got it.
+    verdict: Mapped[str] = mapped_column(String(16))
+    verdict_source: Mapped[str] = mapped_column(String(32))
+    confidence_avg: Mapped[float] = mapped_column(Float)
+    missing_equipment: Mapped[list[str]] = mapped_column(JSONB)
+    violations_detected: Mapped[list[str]] = mapped_column(JSONB)
+    unverifiable_equipment: Mapped[list[str]] = mapped_column(JSONB)
+    detections: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    verification: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    explanation: Mapped[str | None] = mapped_column(Text)
+    model_used: Mapped[str] = mapped_column(String(64))
+    inference_time_ms: Mapped[float] = mapped_column(Float)
+    gemini_invoked: Mapped[bool] = mapped_column(Boolean)
+
+    # The three settings that decide a verdict, as they were.
+    confidence_threshold: Mapped[float] = mapped_column(Float)
+    gemini_verify: Mapped[bool] = mapped_column(Boolean)
+    gemini_min_confidence: Mapped[float] = mapped_column(Float)
+
+    # The photo. photo_key names it in the photo store while it is kept, and
+    # only then. Its size is the upload's, after orientation: the space the
+    # detections' boxes are in.
+    photo_state: Mapped[str] = mapped_column(String(16))
+    photo_key: Mapped[str | None] = mapped_column(String(255))
+    photo_type: Mapped[str | None] = mapped_column(String(32))
+    photo_width: Mapped[int | None] = mapped_column(Integer)
+    photo_height: Mapped[int | None] = mapped_column(Integer)
+    photo_bytes: Mapped[int | None] = mapped_column(Integer)
+    photo_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The worker's training choice at the time of the check (§5).
+    training_consent: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+
+    # The review, beside the verdict, which never changes (§4.3).
+    review_outcome: Mapped[str | None] = mapped_column(String(16))
+    review_note: Mapped[str | None] = mapped_column(String(500))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    worker: Mapped[Worker | None] = relationship()
+    site: Mapped[Site | None] = relationship()
+    reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by])
+
+    __table_args__ = (
+        CheckConstraint("verdict IN ('PASS', 'FAIL', 'NEEDS_REVIEW')", name="verdict_valid"),
+        CheckConstraint("photo_state IN ('kept', 'deleted', 'not_stored')",
+                        name="photo_state_valid"),
+        CheckConstraint("(photo_state = 'kept') = (photo_key IS NOT NULL)",
+                        name="photo_key_when_kept"),
+        CheckConstraint("review_outcome IS NULL OR review_outcome IN ('compliant', 'not_compliant')",
+                        name="review_outcome_valid"),
+        CheckConstraint("(review_outcome IS NULL) = (reviewed_at IS NULL)", name="review_complete"),
+        # The dashboard's lists (§4.1) and the daily photo expiry (§6).
+        Index("ix_checks_at", "at"),
+        Index("ix_checks_site_id_at", "site_id", "at"),
+        Index("ix_checks_worker_id_at", "worker_id", "at"),
+        Index("ix_checks_photo_state_at", "photo_state", "at"),
+    )

@@ -58,6 +58,12 @@ DEFINITIONS: tuple[SettingDef, ...] = (
         "Whether a check needs a worker login (auth-api.md §5).",
         choices=("optional", "required"), confirm=True,
     ),
+    SettingDef(
+        "store_photos", "boolean", "ppb_store_photos",
+        "Whether check photos are kept, for signed-in workers who have seen the notice "
+        "(checks-api.md §7). Off: checks are still stored, without photos.",
+        confirm=True,
+    ),
 )
 BY_NAME: dict[str, SettingDef] = {d.name: d for d in DEFINITIONS}
 
