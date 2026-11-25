@@ -488,10 +488,10 @@ LOG_LEVEL=INFO
 | P0    | Stack selection & architecture                        | ✅ Complete  |
 | P1    | Vision module — dual YOLO training                    | ✅ Complete  |
 | P2    | FastAPI inference server + compliance API             | ✅ Complete  |
-| P3    | React Native mobile app (camera + upload)             | ✅ Complete — tested on a phone with login and checks; open: the photo notice (comes with P6) and a real app icon |
+| P3    | React Native mobile app (camera + upload)             | ✅ Complete — tested on a phone with login and checks; open: the photo notice (comes with P6), and the app icon (in review, #38) |
 | P4    | Gemini explanations + second opinion on NEEDS_REVIEW  | ✅ Complete  |
-| P5    | Job PPE Matrix in PostgreSQL + admin dashboard (React + Vite) | 🔄 Finishing — matrix in Postgres, admin API (`docs/admin-api.md`), dashboard pages served at `/admin/`, and the re-test fixes all done; checked in a real browser on `localhost` and a LAN address. Open: the last follow-ups (#32), and three undecided points (confirmations on reset and deactivate, editing your own name, requirement order) |
-| P6    | Checks, worker photos and supervisor review (photos kept for model training) | 🔄 Contract in review (#34, `docs/checks-api.md`); nothing built until it is agreed |
+| P5    | Job PPE Matrix in PostgreSQL + admin dashboard (React + Vite) | 🔄 Finishing — matrix in Postgres, admin API (`docs/admin-api.md`), dashboard pages served at `/admin/`, and the re-test fixes all done; checked in a real browser on `localhost` and a LAN address; the review follow-ups merged (#32). Open: three undecided points (confirmations on reset and deactivate, editing your own name, requirement order) |
+| P6    | Checks, worker photos and supervisor review (photos kept for model training) | 🔄 Contract agreed (`docs/checks-api.md`, #34); build starting: storing checks and the endpoints (backend), the photo notice in the app and the Checks pages (dashboard) |
 | P7    | Login: admin & supervisor accounts, worker login (built into FastAPI; contract `docs/auth-api.md`) | ✅ Built (backend, app, dashboard login) — switch to `PPB_WORKER_AUTH=required` per `docs/auth-api.md` §5 pending |
 | P8    | Live video mode                                       | ⬜ Future    |
 
