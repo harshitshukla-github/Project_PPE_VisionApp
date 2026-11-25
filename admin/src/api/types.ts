@@ -44,7 +44,9 @@ export type WarningCode =
   | "gemini_verify_off"
   | "worker_auth_required"
   | "gemini_verify_switched_off"
-  | "threshold_changed";
+  | "threshold_changed"
+  /** docs/checks-api.md §7: a retention period changed; says how many photos the next daily run deletes. */
+  | "retention_changed";
 
 export interface Warning {
   code: WarningCode;
@@ -154,6 +156,97 @@ export interface AuditQuery {
   /** Inclusive. */
   from?: string;
   /** Exclusive. */
+  to?: string;
+  limit?: number;
+  cursor?: string | null;
+}
+
+// ---- checks (docs/checks-api.md) -------------------------------------------
+
+export type Verdict = "PASS" | "FAIL" | "NEEDS_REVIEW";
+
+/** One thing the detector found, in the stored photo's pixels (after EXIF orientation). */
+export interface Detection {
+  class: string;
+  confidence: number;
+  /** [x1, y1, x2, y2] */
+  bbox: [number, number, number, number];
+}
+
+/** Gemini's second opinion on the required items the detector didn't find. */
+export interface Verification {
+  model: string;
+  items: Array<{ item: string; status: "worn" | "not_worn" | "uncertain"; confidence: number; reason: string }>;
+  elapsed_ms: number;
+}
+
+/** `kept`, `deleted` (on request or by retention), or `not_stored` (failed, switched off, or no login). */
+export type PhotoState = "kept" | "deleted" | "not_stored";
+
+export interface CheckPhoto {
+  state: PhotoState;
+  width: number | null;
+  height: number | null;
+  bytes: number | null;
+  type: string | null;
+}
+
+export type ReviewOutcome = "compliant" | "not_compliant";
+
+export interface Review {
+  outcome: ReviewOutcome;
+  note: string | null;
+  /** The reviewer's email. */
+  by: string;
+  at: string;
+}
+
+/** A check as the list gives it: everything but `detections` and `verification` (§4.1). */
+export interface CheckSummary {
+  id: number;
+  at: string;
+  worker_id: string;
+  /** null when the check was sent without a login under an ID no worker has. */
+  worker_name: string | null;
+  /** The worker's site when the check was made; null as for `worker_name`. */
+  site: string | null;
+  signed_in: boolean;
+  job: string;
+  job_name: string;
+  job_version: number;
+  /** The job's requirements when the check was made. */
+  required: string[];
+  pending: string[];
+  verdict: Verdict;
+  verdict_source: string;
+  missing_equipment: string[];
+  violations_detected: string[];
+  unverifiable_equipment: string[];
+  explanation: string | null;
+  model_used: string;
+  /** The three settings that decided the verdict, as they were then (§2). */
+  confidence_threshold: number;
+  gemini_verify: boolean;
+  gemini_min_confidence: number;
+  photo: CheckPhoto;
+  training_consent: boolean;
+  review: Review | null;
+}
+
+/** A check in full (§2, §4.2). */
+export interface Check extends CheckSummary {
+  detections: Detection[];
+  verification: Verification | null;
+}
+
+export interface CheckQuery {
+  site?: string;
+  worker?: string;
+  job?: string;
+  verdict?: Verdict;
+  reviewed?: boolean;
+  signed_in?: boolean;
+  from?: string;
   to?: string;
   limit?: number;
   cursor?: string | null;

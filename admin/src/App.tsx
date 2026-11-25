@@ -7,7 +7,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { LoginPage } from "./pages/LoginPage";
 import { UnavailablePage } from "./pages/UnavailablePage";
-import { DEFAULT_PATH, PAGES, PASSWORD_PATH } from "./pages/registry";
+import { DEFAULT_PATH, PASSWORD_PATH, pageFor } from "./pages/registry";
 import { currentPath, replacePath, useHashPath } from "./router";
 
 /**
@@ -51,7 +51,8 @@ export function App() {
 function Dashboard({ user }: { user: DashboardUser }) {
   const hash = useHashPath();
   const path = hash === "/" ? DEFAULT_PATH : hash;
-  const page = PAGES.find((p) => p.path === path);
+  const found = pageFor(path);
+  const page = found?.page;
 
   return (
     <AppShell user={user} path={path}>
@@ -75,8 +76,8 @@ function Dashboard({ user }: { user: DashboardUser }) {
           </p>
         </section>
       ) : (
-        // A key per page, so moving between pages starts each one fresh.
-        <div key={page.path}>{page.render(user)}</div>
+        // A key per address, so moving between pages (or between two checks) starts each one fresh.
+        <div key={path}>{page.render(user, found!.rest)}</div>
       )}
       </ErrorBoundary>
     </AppShell>

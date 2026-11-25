@@ -140,6 +140,21 @@ describe("problemFrom (auth-api §3, by `code`)", () => {
     });
   });
 
+  it("a 404 without a code (FastAPI's own 'no such route') says the server doesn't have this part yet", () => {
+    const problem = problemFrom(new ApiError(404, "Not Found"), "x");
+    expect(problem).toEqual({
+      message: "This server doesn't have this part of the dashboard yet. It needs updating.",
+      tone: "notice",
+    });
+  });
+
+  it("a 404 with the contract's not_found code keeps the server's own sentence", () => {
+    expect(problemFrom(new ApiError(404, "No such check.", { code: "not_found" }), "x")).toEqual({
+      message: "No such check.",
+      tone: "error",
+    });
+  });
+
   it("uses the fallback for errors that aren't ApiErrors", () => {
     expect(problemFrom(new Error("boom"), "Something broke.")).toEqual({
       message: "Something broke.",

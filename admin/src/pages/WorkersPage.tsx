@@ -3,6 +3,8 @@ import { useState, type FormEvent } from "react";
 import {
   ApiError,
   createWorker,
+  deleteWorkerPhotos,
+  getChecks,
   getSites,
   getWorkers,
   resetWorkerPin,
@@ -12,7 +14,7 @@ import {
 import { problemFrom, type Problem } from "../api/problems";
 import type { Worker } from "../api/types";
 import { ProblemBanner } from "../components/ProblemBanner";
-import { Field, Loading, OnceSecret, Pager, Tag, Time } from "../components/widgets";
+import { ConfirmDialog, Field, Loading, OnceSecret, Pager, Tag, Time } from "../components/widgets";
 import { usePages, useResource } from "../hooks/useResource";
 
 const PAGE_SIZE = 25;
@@ -25,6 +27,23 @@ interface Filters {
 }
 
 const NO_FILTERS: Filters = { search: "", site: "", status: "", locked: false };
+
+/**
+ * How many of a worker's photos are still stored, to say in the confirmation
+ * (docs/checks-api.md §9). No endpoint gives the number, so it is counted from
+ * the worker's checks, 200 at a time.
+ */
+async function countStoredPhotos(workerId: string): Promise<number> {
+  let kept = 0;
+  let cursor: string | null = null;
+  for (let pages = 0; pages < 50; pages++) {
+    const page = await getChecks({ worker: workerId, limit: 200, cursor });
+    kept += page.items.filter((c) => c.photo.state === "kept").length;
+    if (!page.next_cursor) break;
+    cursor = page.next_cursor;
+  }
+  return kept;
+}
 
 /**
  * Workers (docs/admin-api.md §8). An admin sees every site; a supervisor
@@ -60,6 +79,9 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
   const [secret, setSecret] = useState<{ title: string; label: string; secret: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ id: string; name: string; site: string } | null>(null);
+  // Deleting a worker's photos (admin, checks-api §4.4): counted first, then confirmed.
+  const [photoDelete, setPhotoDelete] = useState<{ worker: Worker; count: number } | null>(null);
+  const [done, setDone] = useState<string | null>(null);
 
   // The add-a-worker form.
   const [newId, setNewId] = useState("");
@@ -75,6 +97,7 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setMessage(null);
+    setDone(null);
     try {
       await action();
     } catch (err) {
@@ -131,7 +154,36 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
         {isAdmin ? "Workers at every site." : `Workers at ${siteName(user.site ?? "")}.`} A worker signs in to the app with their ID and a PIN you give them.
       </p>
       {message && <ProblemBanner problem={message} />}
+      {done && (
+        <p className="saved" role="status">
+          {done}
+        </p>
+      )}
       {secret && <OnceSecret title={secret.title} label={secret.label} secret={secret.secret} onDone={() => setSecret(null)} />}
+      {photoDelete && (
+        <ConfirmDialog
+          title={`Delete ${photoDelete.worker.display_name}'s photos?`}
+          confirmLabel={`Delete ${photoDelete.count} photo${photoDelete.count === 1 ? "" : "s"}`}
+          busy={busy}
+          onCancel={() => setPhotoDelete(null)}
+          onConfirm={() =>
+            void run(async () => {
+              const { worker } = photoDelete;
+              const { deleted } = await deleteWorkerPhotos(worker.worker_id);
+              setPhotoDelete(null);
+              setDone(`Deleted ${deleted} photo${deleted === 1 ? "" : "s"} of ${worker.display_name} (${worker.worker_id}).`);
+            })
+          }
+        >
+          <p>
+            This deletes all {photoDelete.count} stored photo{photoDelete.count === 1 ? "" : "s"} of {photoDelete.worker.display_name} (
+            {photoDelete.worker.worker_id}). Their checks, verdicts and reviews stay.
+          </p>
+          <p>
+            <strong>It can&apos;t be undone.</strong>
+          </p>
+        </ConfirmDialog>
+      )}
 
       <form className="toolbar" onSubmit={applyFilters} aria-label="Filters">
         <label>
@@ -249,6 +301,9 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
                     <Time iso={w.last_login_at} />
                   </td>
                   <td className="actions">
+                    <a className="button-link" href={`#/checks?worker=${encodeURIComponent(w.worker_id)}`} aria-label={`Checks of ${w.worker_id}`}>
+                      Checks
+                    </a>
                     <button
                       type="button"
                       className="secondary"
@@ -276,6 +331,23 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
                     >
                       {w.is_active ? "Deactivate" : "Reactivate"}
                     </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        aria-label={`Delete photos of ${w.worker_id}`}
+                        disabled={busy}
+                        onClick={() =>
+                          void run(async () => {
+                            const count = await countStoredPhotos(w.worker_id);
+                            if (count === 0) setDone(`${w.display_name} (${w.worker_id}) has no stored photos.`);
+                            else setPhotoDelete({ worker: w, count });
+                          })
+                        }
+                      >
+                        Delete photos
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -206,3 +206,61 @@ describe("WorkersPage as a supervisor", () => {
     expect(await screen.findByTestId("once-secret")).toBeInTheDocument();
   });
 });
+
+describe("WorkersPage and the worker's checks (docs/checks-api.md)", () => {
+  /** How many of this worker's photos the stand-in still keeps. */
+  const kept = (id: string) => backend.state.checks.filter((c) => c.worker_id === id && c.photo.state === "kept").length;
+
+  it("links each worker to their checks", async () => {
+    await open();
+
+    expect(screen.getByRole("link", { name: "Checks of W-0001" })).toHaveAttribute("href", "#/checks?worker=W-0001");
+  });
+
+  it("an admin deletes a worker's photos after a confirmation that says how many; their checks stay", async () => {
+    const user = await open();
+    const id = ids().find((w) => w && kept(w) > 0)!;
+    const count = kept(id);
+    const checks = backend.state.checks.filter((c) => c.worker_id === id).length;
+
+    await user.click(screen.getByRole("button", { name: `Delete photos of ${id}` }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(`This deletes all ${count} stored photo${count === 1 ? "" : "s"}`);
+    expect(dialog).toHaveTextContent("It can't be undone.");
+    await user.click(within(dialog).getByRole("button", { name: `Delete ${count} photo${count === 1 ? "" : "s"}` }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(`Deleted ${count} photo${count === 1 ? "" : "s"} of`);
+    expect(kept(id)).toBe(0);
+    expect(backend.state.checks.filter((c) => c.worker_id === id)).toHaveLength(checks);
+  });
+
+  it("cancelling the confirmation deletes nothing", async () => {
+    const user = await open();
+    const id = ids().find((w) => w && kept(w) > 0)!;
+    const count = kept(id);
+
+    await user.click(screen.getByRole("button", { name: `Delete photos of ${id}` }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(kept(id)).toBe(count);
+  });
+
+  it("a worker with no stored photos gets a plain note, not a confirmation", async () => {
+    const user = await open();
+    const id = ids().find((w) => w && kept(w) === 0)!;
+
+    await user.click(screen.getByRole("button", { name: `Delete photos of ${id}` }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("has no stored photos");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("a supervisor can see a worker's checks, but not delete their photos", async () => {
+    backend = startMockBackend(SUPERVISOR_B);
+    await open(SUPERVISOR_B);
+
+    expect(screen.getAllByRole("link", { name: /^Checks of / }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /^Delete photos of / })).toBeNull();
+  });
+});

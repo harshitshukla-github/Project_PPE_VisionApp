@@ -213,3 +213,59 @@ describe("SettingsPage", () => {
     expect(screen.getByLabelText("Gemini min confidence")).toHaveValue(0.8);
   });
 });
+
+describe("SettingsPage and photos (docs/checks-api.md §7)", () => {
+  it("shows store_photos and the two retention periods, with their ranges and defaults", async () => {
+    await open();
+
+    expect(screen.getByLabelText("Store photos")).toBeChecked();
+    expect(screen.getByLabelText("Photo review days")).toHaveValue(90);
+    expect(screen.getByLabelText("Photo review days")).toHaveAttribute("min", "7");
+    expect(screen.getByLabelText("Photo training days")).toHaveValue(730);
+  });
+
+  it("asks before shortening a period, and passes on the server's warning with the number of photos it deletes", async () => {
+    const user = await open();
+    await type(user, "Photo review days", "7");
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Yes, save" }));
+
+    expect(await screen.findByText(/The next daily run will delete \d+ photos?/)).toBeInTheDocument();
+    expect(saved("photo_review_days").value).toBe(7);
+  });
+
+  it("shows the server's refusal of a training period shorter than the review period, on that setting", async () => {
+    const user = await open();
+    await type(user, "Photo training days", "60"); // within its own range, but shorter than review's 90
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Yes, save" }));
+
+    expect(await screen.findByText(/can't be kept for less time than photos kept for review/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Photo training days")).toHaveAttribute("aria-invalid", "true");
+    expect(saved("photo_training_days")).toBeUndefined();
+  });
+
+  it("next to worker login, counts the checks without a login over the last 3 working days", async () => {
+    // The stand-in's clock: Sunday 25 October. Three working days back is Wednesday the 21st, and
+    // one of its three checks without a login falls after that (the others are older).
+    render(<SettingsPage now={() => new Date("2026-10-25T12:00:00Z")} />);
+
+    const count = await screen.findByTestId("no-login-count");
+    // The date is in the viewer's own format: "21 October" or "October 21".
+    expect(count).toHaveTextContent(/since Wednesday, (21 October|October 21): 1\./);
+  });
+
+  it("leaves the count out when the server can't give it (no checks endpoints yet)", async () => {
+    setAdminTransport(async (url, init) =>
+      url.startsWith("/api/v1/admin/checks")
+        ? new Response(JSON.stringify({ detail: "Not Found" }), { status: 404 })
+        : backend.fetch(url, init),
+    );
+    await open();
+
+    expect(screen.queryByTestId("no-login-count")).toBeNull();
+    expect(screen.getByLabelText("Worker auth")).toBeInTheDocument();
+  });
+});

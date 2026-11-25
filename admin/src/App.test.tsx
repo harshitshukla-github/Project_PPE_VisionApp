@@ -368,20 +368,24 @@ describe("the signed-in dashboard", () => {
     return backend;
   }
 
+  /** The navigation's link labels, without the Checks link's waiting count. */
+  const navLabels = (nav: HTMLElement) =>
+    within(nav)
+      .getAllByRole("link")
+      .map((a) => a.firstChild?.textContent);
+
   it("gives an admin every page in the navigation", async () => {
     openAs(ADMIN_SESSION);
 
     const nav = await screen.findByRole("navigation", { name: "Pages" });
-    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "Matrix", "Jobs", "Workers", "Sites", "Users", "Settings", "Audit log",
-    ]);
+    expect(navLabels(nav)).toEqual(["Matrix", "Checks", "Jobs", "Workers", "Sites", "Users", "Settings", "Audit log"]);
   });
 
-  it("gives a supervisor only the matrix and the workers", async () => {
+  it("gives a supervisor the matrix, the checks and the workers", async () => {
     openAs(SUPERVISOR_SESSION);
 
     const nav = await screen.findByRole("navigation", { name: "Pages" });
-    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["Matrix", "Workers"]);
+    expect(navLabels(nav)).toEqual(["Matrix", "Checks", "Workers"]);
     expect(screen.getByTestId("whoami")).toHaveTextContent("Site Supervisor B · supervisor");
   });
 
@@ -409,6 +413,23 @@ describe("the signed-in dashboard", () => {
     expect(await screen.findByRole("heading", { name: "Audit log" })).toBeInTheDocument();
   });
 
+  it("shows on the Checks link how many checks are waiting for review at the supervisor's site", async () => {
+    const backend = openAs(SUPERVISOR_SESSION);
+    const waiting = backend.state.checks.filter(
+      (c) => c.site === "pune_tower_b" && c.verdict === "NEEDS_REVIEW" && !c.review,
+    ).length;
+
+    expect(await screen.findByTestId("waiting-count")).toHaveTextContent(`${waiting} waiting for review`);
+  });
+
+  it("opens a check from its own address, with Checks marked as the current page", async () => {
+    openAs(SUPERVISOR_SESSION, "#/checks/1001");
+
+    expect(await screen.findByRole("heading", { name: "Check #1001" })).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Pages" });
+    expect(within(nav).getByRole("link", { name: /^Checks/ })).toHaveAttribute("aria-current", "page");
+  });
+
   it("says so for an address that isn't a page", async () => {
     openAs(ADMIN_SESSION, "#/nowhere");
 
@@ -425,9 +446,12 @@ describe("the signed-in dashboard", () => {
 
     expect(await screen.findByRole("heading", { name: "You don't have access to this page" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Users" })).toBeNull();
-    // The Users page was never opened, so nothing was asked of the server. (Its `403 forbidden`
-    // is still the real rule, covered by the mock backend's own tests.)
-    expect(asked).not.toHaveBeenCalled();
+    // The Users page was never opened, so the server wasn't asked for users. (Its `403 forbidden`
+    // is still the real rule, covered by the mock backend's own tests.) The only call is the
+    // navigation's count of checks waiting for review.
+    const urls = asked.mock.calls.map(([url]) => url);
+    expect(urls.some((url) => url.includes("/admin/users"))).toBe(false);
+    expect(urls.every((url) => url.startsWith("/api/v1/admin/checks?"))).toBe(true);
   });
 
   it("says plainly that the admin data is sample data while the API is faked", async () => {

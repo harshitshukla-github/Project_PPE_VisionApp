@@ -1,11 +1,30 @@
 import { useState } from "react";
 
-import { ApiError, getSettings, patchSettings } from "../api/client";
+import { ApiError, getChecks, getSettings, patchSettings } from "../api/client";
 import { problemFrom, type Problem } from "../api/problems";
 import type { Setting, SettingValue, SettingsPatch, Warning } from "../api/types";
 import { ProblemBanner } from "../components/ProblemBanner";
 import { ConfirmDialog, Loading, Tag, Time } from "../components/widgets";
+import { workingDaysBack } from "../dates";
 import { useResource } from "../hooks/useResource";
+
+/**
+ * How many checks arrived without a login over the last 3 working days: the
+ * count the switch of `worker_auth` to `required` waits on (auth-api.md §5,
+ * checks-api.md §4.1). Null when the server can't say (no checks endpoints
+ * yet); the page then just doesn't show it.
+ */
+function useNoLoginCount(now: () => Date) {
+  const since = workingDaysBack(3, now());
+  const count = useResource(
+    () =>
+      getChecks({ signed_in: false, from: since.toISOString().replace(".000Z", "Z"), limit: 1 }).then((page) =>
+        typeof page?.total === "number" ? page.total : null,
+      ),
+    [],
+  );
+  return { since, count: count.data ?? null };
+}
 
 /** One edit in progress: a new value (as typed), or "go back to the default". */
 type Edit = { kind: "value"; text: string } | { kind: "default" };
@@ -29,9 +48,12 @@ function parse(setting: Setting, text: string): SettingValue | undefined {
  * saving needs a confirmation, so nothing about them is written down twice.
  * Saving sends a merge patch of only what changed: a value sets it, "default"
  * (`null`) clears the override. It is all or nothing.
+ *
+ * `now` is only a seam for tests: it decides the 3-working-day window.
  */
-export function SettingsPage() {
+export function SettingsPage({ now = () => new Date() }: { now?: () => Date } = {}) {
   const { data, problem, loading, setData } = useResource(getSettings, []);
+  const noLogin = useNoLoginCount(now);
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -149,6 +171,13 @@ export function SettingsPage() {
                   {label(s.name)} {s.overridden ? <Tag tone="warn">Changed here</Tag> : <Tag>Default</Tag>}
                 </legend>
                 <p className="hint">{s.description}</p>
+                {s.name === "worker_auth" && noLogin.count !== null && (
+                  <p className="hint" data-testid="no-login-count">
+                    Checks sent without a login since{" "}
+                    {noLogin.since.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}:{" "}
+                    <strong>{noLogin.count}</strong>. Switching to required waits for none over 3 working days.
+                  </p>
+                )}
                 <div className="setting-input">
                   {s.type === "number" && (
                     <input

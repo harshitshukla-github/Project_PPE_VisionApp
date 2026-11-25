@@ -19,6 +19,8 @@ import type { DashboardUser } from "../api/client";
 import type {
   AdminUser,
   AuditEntry,
+  Check,
+  CheckSummary,
   Job,
   Page,
   Requirement,
@@ -67,7 +69,26 @@ const SETTING_DEFINITIONS: SettingDefinition[] = [
     name: "worker_auth", type: "choice", min: null, max: null, step: null, choices: ["optional", "required"], confirm: true,
     description: "Whether a check needs a worker login (auth-api.md §5).", default: "optional",
   },
+  // docs/checks-api.md §7. Whether these ask before saving isn't in the contract; the two periods
+  // do here, because shortening one deletes photos.
+  {
+    name: "store_photos", type: "boolean", min: null, max: null, step: null, choices: null, confirm: false,
+    description: "Keep the photo with each stored check. Off: checks are stored without photos; nothing already stored is deleted.",
+    default: true,
+  },
+  {
+    name: "photo_review_days", type: "number", min: 7, max: 3650, step: 1, choices: null, confirm: true,
+    description: "How many days a photo is kept for review, without the worker's consent to training.", default: 90,
+  },
+  {
+    name: "photo_training_days", type: "number", min: 30, max: 3650, step: 1, choices: null, confirm: true,
+    description: "How many days a photo is kept when the worker agreed to training. Never shorter than the review period.",
+    default: 730,
+  },
 ];
+
+/** Settings that are whole numbers of days (§7). */
+const INTEGER_SETTINGS = new Set(["photo_review_days", "photo_training_days"]);
 
 const PASSWORD_WORDS = ["glade", "copper", "rivet", "maple", "harbor", "linen", "ember", "quartz", "willow", "anchor"];
 
@@ -95,7 +116,7 @@ export function createMockBackend(options: MockOptions): MockBackend {
     status: number,
     code: string,
     detail: string,
-    extra: { field?: string; current?: Job } = {},
+    extra: { field?: string; current?: Job | Check } = {},
   ): Response => send(status, { detail, code, ...extra });
 
   const forbidden = () => fail(403, "forbidden", "You don't have access to this.");
@@ -418,6 +439,9 @@ export function createMockBackend(options: MockOptions): MockBackend {
       if (value !== null) {
         if (def.type === "number") {
           if (typeof value !== "number") return fail(422, "invalid", `${name} must be a number.`, { field: name });
+          if (INTEGER_SETTINGS.has(name) && !Number.isInteger(value)) {
+            return fail(422, "invalid", `${name} must be a whole number of days.`, { field: name });
+          }
           if (value < def.min! || value > def.max!) {
             return fail(422, "out_of_range", `${name} must be between ${def.min} and ${def.max}.`, { field: name });
           }
@@ -428,6 +452,17 @@ export function createMockBackend(options: MockOptions): MockBackend {
         }
       }
       changes.push({ name, value: value as SettingValue | null });
+    }
+
+    // checks-api §7: training is never shorter than review, whichever one (or both) the patch changes.
+    const after = (name: string): number => {
+      const change = changes.find((c) => c.name === name);
+      if (!change) return readSetting(name).value as number;
+      return (change.value ?? SETTING_DEFINITIONS.find((d) => d.name === name)!.default) as number;
+    };
+    if (after("photo_training_days") < after("photo_review_days")) {
+      const field = changes.some((c) => c.name === "photo_training_days") ? "photo_training_days" : "photo_review_days";
+      return fail(422, "out_of_range", "Photos kept for training can't be kept for less time than photos kept for review.", { field });
     }
 
     const warnings: Warning[] = [];
@@ -455,6 +490,13 @@ export function createMockBackend(options: MockOptions): MockBackend {
         warnings.push({
           code: "threshold_changed", setting: name,
           message: "Every verdict from now on uses the new detector threshold.",
+        });
+      }
+      if ((name === "photo_review_days" || name === "photo_training_days") && effective !== was.value) {
+        const doomed = photosPastRetention();
+        warnings.push({
+          code: "retention_changed", setting: name,
+          message: `The next daily run will delete ${doomed} photo${doomed === 1 ? "" : "s"} older than the new period.`,
         });
       }
     }
@@ -649,6 +691,127 @@ export function createMockBackend(options: MockOptions): MockBackend {
     return send(200, { one_time_pin: oneTimeSecret() });
   };
 
+  // ---- checks (docs/checks-api.md) -------------------------------------------
+
+  /** A supervisor sees their own site's checks; one with no site (an unknown ID, no login) only an admin sees. */
+  const visibleCheck = (user: DashboardUser, c: Check | undefined) =>
+    c && (isAdmin(user) || (c.site !== null && c.site === user.site)) ? c : undefined;
+
+  const findCheck = (id: string) => state.checks.find((c) => String(c.id) === id);
+
+  const summary = (c: Check): CheckSummary => {
+    const { detections: _detections, verification: _verification, ...rest } = c;
+    return structuredClone(rest);
+  };
+
+  /** Kept photos older than the period that applies to them now (§6). */
+  function photosPastRetention(): number {
+    const reviewDays = readSetting("photo_review_days").value as number;
+    const trainingDays = readSetting("photo_training_days").value as number;
+    return state.checks.filter((c) => {
+      if (c.photo.state !== "kept") return false;
+      const days = c.training_consent ? trainingDays : reviewDays;
+      return now().getTime() - new Date(c.at).getTime() > days * 86_400_000;
+    }).length;
+  }
+
+  const listChecks: Handler = ({ user, query }) => {
+    const siteFilter = isAdmin(user) ? query.get("site") : user.site; // a supervisor always gets their own site
+    const worker = (query.get("worker") ?? "").trim().toLowerCase();
+    const flag = (name: string) => query.get(name); // "true", "false", or null for both
+    const from = query.get("from");
+    const to = query.get("to");
+    const verdict = query.get("verdict");
+    if (verdict && !["PASS", "FAIL", "NEEDS_REVIEW"].includes(verdict)) {
+      return fail(422, "invalid", "verdict is PASS, FAIL or NEEDS_REVIEW.", { field: "verdict" });
+    }
+    const rows = state.checks
+      .filter((c) => visibleCheck(user, c))
+      .filter((c) => !siteFilter || c.site === siteFilter)
+      .filter((c) => !worker || c.worker_id.toLowerCase() === worker)
+      .filter((c) => !query.get("job") || c.job === query.get("job"))
+      .filter((c) => !verdict || c.verdict === verdict)
+      .filter((c) => flag("reviewed") === null || String(c.review !== null) === flag("reviewed"))
+      .filter((c) => flag("signed_in") === null || String(c.signed_in) === flag("signed_in"))
+      .filter((c) => !from || c.at >= from)
+      .filter((c) => !to || c.at < to)
+      .sort((a, b) => (a.at === b.at ? b.id - a.id : a.at < b.at ? 1 : -1))
+      .map(summary);
+    const page = pageOf(rows, query);
+    return page instanceof Response ? page : send(200, page);
+  };
+
+  const getCheck: Handler = ({ user, params }) => {
+    const check = visibleCheck(user, findCheck(params[0]));
+    return check ? send(200, structuredClone(check)) : notFound("check");
+  };
+
+  /** A drawn stand-in for the worker's photo, the size the real one would be, so the boxes land on it. */
+  function samplePhoto(check: Check): string {
+    const { width, height } = check.photo as { width: number; height: number };
+    return [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+      `<rect width="${width}" height="${height}" fill="#c9cfd6"/>`,
+      `<rect y="${height * 0.78}" width="${width}" height="${height * 0.22}" fill="#9aa3ad"/>`,
+      `<circle cx="540" cy="250" r="110" fill="#6b5e55"/>`,
+      `<rect x="330" y="380" width="420" height="640" rx="60" fill="#3f4a56"/>`,
+      `<rect x="230" y="420" width="110" height="560" rx="50" fill="#3f4a56"/>`,
+      `<rect x="740" y="420" width="110" height="560" rx="50" fill="#3f4a56"/>`,
+      `<rect x="370" y="1000" width="150" height="400" rx="40" fill="#2c343d"/>`,
+      `<rect x="560" y="1000" width="150" height="400" rx="40" fill="#2c343d"/>`,
+      `<text x="40" y="${height - 40}" font-family="sans-serif" font-size="40" fill="#1c1f23">Sample photo, check ${check.id}</text>`,
+      `</svg>`,
+    ].join("");
+  }
+
+  const getCheckPhoto: Handler = ({ user, params }) => {
+    const check = visibleCheck(user, findCheck(params[0]));
+    if (!check) return notFound("check");
+    if (check.photo.state === "not_stored") return fail(404, "not_found", "This check's photo was never stored.");
+    if (check.photo.state === "deleted") return fail(410, "photo_deleted", "This check's photo has been deleted.");
+    return new Response(samplePhoto(check), {
+      status: 200,
+      headers: { "Content-Type": "image/svg+xml", "Cache-Control": "private, no-store", "Content-Disposition": "inline" },
+    });
+  };
+
+  const reviewCheck: Handler = ({ user, params, body }) => {
+    const check = visibleCheck(user, findCheck(params[0]));
+    if (!check) return notFound("check");
+    if (body.outcome !== "compliant" && body.outcome !== "not_compliant") {
+      return fail(422, "invalid", "A review's outcome is compliant or not compliant.", { field: "outcome" });
+    }
+    const note = body.note === undefined || body.note === null ? null : body.note;
+    if (note !== null && (typeof note !== "string" || note.length > 500)) {
+      return fail(422, "invalid", "A note is at most 500 characters.", { field: "note" });
+    }
+    const replace = body.replace === true;
+    if (replace && !isAdmin(user)) return fail(422, "invalid", "Only an admin can replace a review.", { field: "replace" });
+    if (check.review && !replace) {
+      return fail(409, "already_reviewed", "Someone has reviewed this check already.", { current: structuredClone(check) });
+    }
+    const before = check.review ? { outcome: check.review.outcome, note: check.review.note } : null;
+    const text = typeof note === "string" && note.trim() ? note.trim() : null;
+    check.review = { outcome: body.outcome, note: text, by: user.email, at: stamp() };
+    record(user, "check.review", `check:${check.id}`, check.site, before, { outcome: body.outcome, note: text });
+    return send(200, { check: structuredClone(check) });
+  };
+
+  const deleteWorkerPhotos: Handler = ({ user, params }) => {
+    if (!isAdmin(user)) return forbidden();
+    const worker = findWorker(params[0]);
+    if (!worker) return notFound("worker");
+    let deleted = 0;
+    for (const c of state.checks) {
+      if (c.worker_id.toLowerCase() === worker.worker_id.toLowerCase() && c.photo.state === "kept") {
+        c.photo = { ...c.photo, state: "deleted" };
+        deleted++;
+      }
+    }
+    record(user, "worker.photos_delete", `worker:${worker.worker_id}`, worker.site, null, { deleted });
+    return send(200, { deleted });
+  };
+
   // ---- audit log (§9) --------------------------------------------------------
 
   const listAudit: Handler = ({ user, query }) => {
@@ -691,6 +854,11 @@ export function createMockBackend(options: MockOptions): MockBackend {
     ["POST", /^\/workers$/, createWorker],
     ["PATCH", /^\/workers\/([^/]+)$/, patchWorker],
     ["POST", /^\/workers\/([^/]+)\/reset-pin$/, resetWorkerPin],
+    ["DELETE", /^\/workers\/([^/]+)\/photos$/, deleteWorkerPhotos],
+    ["GET", /^\/checks$/, listChecks],
+    ["GET", /^\/checks\/([^/]+)$/, getCheck],
+    ["GET", /^\/checks\/([^/]+)\/photo$/, getCheckPhoto],
+    ["POST", /^\/checks\/([^/]+)\/review$/, reviewCheck],
     ["GET", /^\/audit$/, listAudit],
   ];
 
