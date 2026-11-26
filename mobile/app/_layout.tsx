@@ -24,15 +24,21 @@ export default function RootLayout() {
  *
  * - Login: signed out (or still checking the saved token).
  * - Change PIN: signed in, but still on the PIN the supervisor issued.
+ * - Photo notice: signed in, own PIN chosen, and the current photo notice not
+ *   answered yet (docs/checks-api.md §5). It comes before the app, so when
+ *   the server says a notice is owed, the app's guard turns off and the router
+ *   lands here, the first screen still allowed. If the server can't say, no
+ *   notice is shown and the app works as before.
  * - The 3 persistent screens (Home, Capture, History) live in the (tabs)
  *   group; Result and History detail are pushed on top.
  * - Settings is always reachable: the server URL must be set before the
  *   first login can work.
  */
 function RootStack() {
-  const { auth } = useSession();
+  const { auth, noticeNeeded } = useSession();
   const signedIn = auth.kind === "signedIn";
   const mustChangePin = signedIn && auth.mustChangePin;
+  const showNotice = signedIn && !mustChangePin && noticeNeeded;
 
   return (
     <Stack>
@@ -42,7 +48,10 @@ function RootStack() {
       <Stack.Protected guard={mustChangePin}>
         <Stack.Screen name="change-pin" options={{ title: "Choose a PIN", headerShown: false }} />
       </Stack.Protected>
-      <Stack.Protected guard={signedIn && !mustChangePin}>
+      <Stack.Protected guard={showNotice}>
+        <Stack.Screen name="photo-notice" options={{ title: "Your photos", headerShown: false }} />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && !mustChangePin && !showNotice}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         {/* Without a back title, iOS labels the button with the (tabs) group's route name. */}
         <Stack.Screen name="result" options={{ title: "Result", headerBackTitle: "Back" }} />

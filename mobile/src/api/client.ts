@@ -7,6 +7,7 @@ import * as SecureStore from "expo-secure-store";
 
 import type {
   ComplianceCheckResponse,
+  ConsentState,
   HealthResponse,
   JobsResponse,
   WorkerLoginResponse,
@@ -84,19 +85,29 @@ export async function clearToken(): Promise<void> {
 /**
  * Thrown by every client function on a failed request. `status` is 0 for
  * client-side/network failures. `code` and `retryAfterS` come from the
- * backend's error body (docs/auth-api.md §3) when it sent them.
+ * backend's error body (docs/auth-api.md §3) when it sent them. `body` is that
+ * whole JSON body, for an error that carries more: `409 notice_changed` has
+ * the current notice in `body.notice` (docs/checks-api.md §5).
  */
 export class ApiError extends Error {
   status: number;
   code?: string;
   retryAfterS?: number;
+  body?: Record<string, unknown>;
 
-  constructor(status: number, message: string, code?: string, retryAfterS?: number) {
+  constructor(
+    status: number,
+    message: string,
+    code?: string,
+    retryAfterS?: number,
+    body?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.retryAfterS = retryAfterS;
+    this.body = body;
   }
 }
 
@@ -124,7 +135,8 @@ async function toApiError(response: Response): Promise<ApiError> {
     } else {
       message = JSON.stringify(body);
     }
-    return new ApiError(response.status, message, code, retryAfterS);
+    const whole = body && typeof body === "object" && !Array.isArray(body) ? body : undefined;
+    return new ApiError(response.status, message, code, retryAfterS, whole);
   } catch {
     return new ApiError(
       response.status,
@@ -197,6 +209,28 @@ export function changeWorkerPin(currentPin: string, newPin: string): Promise<voi
   return postJson<void>("/auth/worker/pin", {
     current_pin: currentPin,
     new_pin: newPin,
+  });
+}
+
+/**
+ * GET /api/v1/auth/worker/consent — the photo notice in the server's words,
+ * and what this worker last answered (docs/checks-api.md §5). Needs a worker
+ * who has chosen their own PIN (403 pin_change_required otherwise).
+ */
+export function getConsent(): Promise<ConsentState> {
+  return requestJson<ConsentState>("/auth/worker/consent");
+}
+
+/**
+ * PUT /api/v1/auth/worker/consent — the worker's answer to the notice they
+ * were shown. `version` is that notice's; if the notice has changed since, the
+ * server answers 409 notice_changed with the current one in `body.notice`.
+ */
+export function answerConsent(version: number, training: boolean): Promise<ConsentState> {
+  return requestJson<ConsentState>("/auth/worker/consent", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version, training }),
   });
 }
 

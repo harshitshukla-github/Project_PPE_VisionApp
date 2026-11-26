@@ -144,3 +144,24 @@ export interface WorkerMeResponse {
   must_change_pin: boolean;
   expires_at: string;
 }
+
+/**
+ * The photo notice, in the server's words (docs/checks-api.md §5). The app
+ * shows `text` and `training_question` as they come; every change of wording,
+ * including a changed retention period, is a new `version`.
+ */
+export interface PhotoNotice {
+  version: number;
+  text: string;
+  training_question: string;
+}
+
+/** Body of GET and PUT /api/v1/auth/worker/consent. */
+export interface ConsentState {
+  notice: PhotoNotice;
+  /** The version this worker last answered; null until they first answer. */
+  seen_version: number | null;
+  /** Whether they agreed to their photos being kept for training. */
+  training: boolean;
+  updated_at: string | null;
+}

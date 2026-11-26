@@ -3,8 +3,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 
 import {
+  ApiError,
+  answerConsent,
   changeWorkerPin,
   clearToken,
+  getConsent,
   getHealth,
   getJobs,
   getServerUrl,
@@ -160,5 +163,48 @@ describe("postComplianceCheck", () => {
     expect(url).toBe("http://192.168.1.5:8000/api/v1/compliance/check");
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
+  });
+});
+
+describe("photo consent (docs/checks-api.md §5)", () => {
+  const NOTICE = { version: 2, text: "Photos are kept…", training_question: "Can we also keep them?" };
+
+  it("GET /auth/worker/consent with the worker token", async () => {
+    await AsyncStorage.setItem("@ppb/server_url", "http://192.168.1.5:8000");
+    await setToken("tok-123");
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ notice: NOTICE, seen_version: 1, training: false, updated_at: null }) });
+
+    const consent = await getConsent();
+
+    expect(consent.notice.version).toBe(2);
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe("http://192.168.1.5:8000/api/v1/auth/worker/consent");
+    expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer tok-123");
+  });
+
+  it("PUT the answer as JSON: the version shown, and the training choice", async () => {
+    await AsyncStorage.setItem("@ppb/server_url", "http://192.168.1.5:8000");
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ notice: NOTICE, seen_version: 2, training: true, updated_at: null }) });
+
+    await answerConsent(2, true);
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual({ version: 2, training: true });
+    expect((init?.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+  });
+
+  it("409 notice_changed keeps the current notice from the body, so the app can show it", async () => {
+    await AsyncStorage.setItem("@ppb/server_url", "http://192.168.1.5:8000");
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ detail: "The notice has changed.", code: "notice_changed", notice: NOTICE }),
+    });
+
+    const err = await answerConsent(1, false).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 409, code: "notice_changed", body: { notice: NOTICE } });
   });
 });

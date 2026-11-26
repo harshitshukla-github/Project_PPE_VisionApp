@@ -12,13 +12,24 @@ jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace, push: jest.fn() }),
 }));
 
-// Settings only needs the sign-in state and signOut; no provider (and no jobs fetch) required.
+// Settings needs the sign-in state, signOut and the photo consent; no provider (and no jobs fetch) required.
 const mockSignOut = jest.fn();
-let mockAuth: { kind: string; worker?: { worker_id: string; display_name: string } } = {
+let mockAuth: { kind: string; mustChangePin?: boolean; worker?: { worker_id: string; display_name: string } } = {
   kind: "signedOut",
 };
+let mockConsent: unknown = null;
+const mockRefreshConsent = jest.fn();
+const mockAnswerNotice = jest.fn();
 jest.mock("../../src/context/SessionContext", () => ({
-  useSession: () => ({ auth: mockAuth, signOut: mockSignOut }),
+  useSession: () => ({
+    auth: mockAuth,
+    signOut: mockSignOut,
+    consent: mockConsent,
+    refreshConsent: mockRefreshConsent,
+    answerNotice: mockAnswerNotice,
+  }),
+  noticeFrom: (err: { code?: string; body?: { notice?: unknown } }) =>
+    err?.code === "notice_changed" ? (err.body?.notice ?? null) : null,
 }));
 
 const mockFetch = jest.fn();
@@ -32,6 +43,96 @@ beforeEach(async () => {
   mockSignOut.mockReset();
   mockSignOut.mockResolvedValue(undefined);
   mockAuth = { kind: "signedOut" };
+  mockConsent = null;
+  mockRefreshConsent.mockReset();
+  mockRefreshConsent.mockResolvedValue(null);
+  mockAnswerNotice.mockReset();
+});
+
+describe("SettingsScreen: your photos (docs/checks-api.md §5)", () => {
+  const NOTICE_1 = {
+    version: 1,
+    text: "Photos from your PPE checks are kept on the company's server for up to 90 days.",
+    training_question: "Can we also keep your photos for up to 730 days to improve the PPE detector?",
+  };
+  const NOTICE_2 = { ...NOTICE_1, version: 2, text: "Photos are now kept for up to 60 days." };
+  const state = (notice: typeof NOTICE_1, seen: number | null, training: boolean) => ({
+    notice,
+    seen_version: seen,
+    training,
+    updated_at: "2026-11-20T06:10:00Z",
+  });
+
+  beforeEach(() => {
+    mockAuth = { kind: "signedIn", mustChangePin: false, worker: { worker_id: "W-0042", display_name: "Asha Verma" } };
+  });
+
+  it("shows the worker's training choice, the notice to read again, and who to ask about deleting photos", async () => {
+    mockConsent = state(NOTICE_1, 1, true);
+    render(<SettingsScreen />);
+
+    expect(await screen.findByTestId("photo-settings")).toBeTruthy();
+    expect(screen.getByTestId("settings-training-switch").props.value).toBe(true);
+    expect(screen.getByText("To have your photos deleted, ask your supervisor.")).toBeTruthy();
+    expect(screen.queryByText(NOTICE_1.text)).toBeNull();
+
+    fireEvent.press(screen.getByText("Read the photo notice"));
+    expect(screen.getByText(NOTICE_1.text)).toBeTruthy();
+  });
+
+  it("isn't shown to someone signed out, or still on the issued PIN (the server refuses consent then)", async () => {
+    mockAuth = { kind: "signedOut" };
+    const { unmount } = render(<SettingsScreen />);
+    expect(screen.queryByTestId("photo-settings")).toBeNull();
+    unmount();
+
+    mockAuth = { kind: "signedIn", mustChangePin: true, worker: { worker_id: "W-0042", display_name: "Asha Verma" } };
+    render(<SettingsScreen />);
+    expect(screen.queryByTestId("photo-settings")).toBeNull();
+    expect(screen.getByText(/Signed in as Asha Verma/)).toBeTruthy();
+  });
+
+  it("asks the server first, then saves the choice against the current version", async () => {
+    mockConsent = state(NOTICE_1, 1, false);
+    mockRefreshConsent.mockResolvedValue(state(NOTICE_1, 1, false));
+    mockAnswerNotice.mockResolvedValue(state(NOTICE_1, 1, true));
+    render(<SettingsScreen />);
+
+    fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+
+    await waitFor(() => expect(mockAnswerNotice).toHaveBeenCalledWith(1, true));
+    expect(mockRefreshConsent).toHaveBeenCalled();
+    expect(await screen.findByText("Saved. Your photos may be kept to improve the PPE detector.")).toBeTruthy();
+  });
+
+  it("shows a newer notice first, with the choice just made, and saves the answer to that version", async () => {
+    mockConsent = state(NOTICE_1, 1, false);
+    mockRefreshConsent.mockResolvedValue(state(NOTICE_2, 1, false));
+    mockAnswerNotice.mockResolvedValue(state(NOTICE_2, 2, true));
+    render(<SettingsScreen />);
+
+    fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+
+    expect(await screen.findByText(NOTICE_2.text)).toBeTruthy();
+    expect(mockAnswerNotice).not.toHaveBeenCalled(); // nothing saved before it is read
+    expect(screen.getByTestId("training-switch").props.value).toBe(true);
+
+    fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
+
+    await waitFor(() => expect(mockAnswerNotice).toHaveBeenCalledWith(2, true));
+    expect(await screen.findByText("Saved. Your photos may be kept to improve the PPE detector.")).toBeTruthy();
+  });
+
+  it("says so when the server can't be asked, and saves nothing", async () => {
+    mockConsent = state(NOTICE_1, 1, false);
+    mockRefreshConsent.mockResolvedValue(null);
+    render(<SettingsScreen />);
+
+    fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+
+    expect(await screen.findByText("Couldn't reach the server to change this. Try again.")).toBeTruthy();
+    expect(mockAnswerNotice).not.toHaveBeenCalled();
+  });
 });
 
 describe("SettingsScreen account section", () => {
