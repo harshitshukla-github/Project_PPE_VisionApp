@@ -21,8 +21,10 @@ Admin system (Phase 3, contract in ``docs/admin-api.md``):
 
 Checks and review (Phase 6, contract in ``docs/checks-api.md``):
 
-- ``checks``  every compliance check that reached a verdict, with what it was
-              judged against, its photo's state, and the review beside it
+- ``checks``           every compliance check that reached a verdict, with what
+                       it was judged against, its photo's state, and the review
+                       beside it
+- ``consent_notices``  each version of the photo notice the app shows workers
 
 Schema changes go through Alembic (``src/db/migrations``); after editing
 these classes, add a migration. ``tests/test_db_matrix.py`` fails if the
@@ -311,6 +313,25 @@ class AuditEntry(Base):
     before: Mapped[Any | None] = mapped_column(JSONB)
     after: Mapped[Any | None] = mapped_column(JSONB)
     ip: Mapped[str | None] = mapped_column(String(64))
+
+
+class ConsentNotice(Base):
+    """One version of the photo notice the app shows workers (docs/checks-api.md §5).
+
+    The server writes the notice, with the retention periods filled in. Any
+    change to its words, a changed period included, adds a version; old ones
+    stay, so the version in a ``worker.consent`` audit entry still says what
+    that worker read.
+    """
+
+    __tablename__ = "consent_notices"
+
+    version: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    text: Mapped[str] = mapped_column(Text)
+    training_question: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Check(Base):

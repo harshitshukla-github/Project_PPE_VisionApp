@@ -271,11 +271,24 @@ the worker still gets their verdict and the server logs why.
   which the dashboard's Workers page calls, or on the server for a request
   that arrives another way. The checks stay.
 
+- **The notice.** The app asks the server for the photo notice after sign-in
+  (`/auth/worker/consent`) and shows it in the server's words. Keeping photos
+  longer for training is the worker's choice, off until they say yes;
+  withdrawing it applies to their earlier photos too.
+- **How long photos are kept:** 90 days, or 730 with training consent
+  (`PPB_PHOTO_REVIEW_DAYS`, `PPB_PHOTO_TRAINING_DAYS`, or the dashboard's
+  settings). The API server deletes older photos once a day by itself.
+
 ```bash
 uv run python cli.py photos delete --worker W-0042      # says how many and asks; --yes skips that
+uv run python cli.py photos purge --dry-run             # how many are past their period (drop --dry-run to delete them now)
+uv run python cli.py photos export --consented --to ../ppb-training/2026-12   # consented photos only, no names
 ```
 
-After pulling, run `uv run python cli.py db migrate` to reach migration `0004`.
+An export is still workers' photos: put it outside the project (never in
+git) and delete it once the training run no longer needs it.
+
+After pulling, run `uv run python cli.py db migrate` to reach migration `0005`.
 
 ## Admin dashboard
 

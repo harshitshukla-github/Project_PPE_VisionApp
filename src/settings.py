@@ -119,6 +119,19 @@ class Settings(BaseSettings):
     ppb_store_photos: bool = Field(True, alias="PPB_STORE_PHOTOS")
     # Where kept photos live: outside anything served, never in git.
     ppb_photo_dir: Path = Field(Path("data/photos"), alias="PPB_PHOTO_DIR")
+    # How long a photo is kept (docs/checks-api.md §6): for review, and when the
+    # worker agreed to training. Training is never the shorter of the two.
+    ppb_photo_review_days: int = Field(90, ge=7, le=3650, alias="PPB_PHOTO_REVIEW_DAYS")
+    ppb_photo_training_days: int = Field(730, ge=30, le=3650, alias="PPB_PHOTO_TRAINING_DAYS")
+
+    @model_validator(mode="after")
+    def _training_not_shorter_than_review(self) -> "Settings":
+        if self.ppb_photo_training_days < self.ppb_photo_review_days:
+            raise ValueError(
+                "PPB_PHOTO_TRAINING_DAYS can't be shorter than PPB_PHOTO_REVIEW_DAYS: saying yes "
+                "to training can't mean a photo is kept for less time."
+            )
+        return self
 
     @model_validator(mode="after")
     def _paths_from_project_root(self) -> "Settings":
