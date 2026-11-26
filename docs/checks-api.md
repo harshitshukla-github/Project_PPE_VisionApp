@@ -101,8 +101,9 @@ the app got, plus what's needed to review it and train on it later.
   check later needs them.
 - `model_used` is the variant name the server reports, such as `"yolo11l"`.
 - `photo.state` is `kept`, `deleted` (on request or by the retention rule,
-  §6) or `not_stored`: storing failed, photos are switched off (§7), or the
-  check was sent without a login, whose photo is never kept (§10, 8).
+  §6) or `not_stored`: storing failed, photos are switched off (§7), the
+  check was sent without a login, whose photo is never kept (§10, 8), or the
+  worker hasn't answered the photo notice yet (§5).
 - `training_consent` is the worker's choice **when the check was made** (§5),
   set to `false` on all their checks if they later withdraw.
 - `review` is `null` until someone reviews the check (§4.3).
@@ -306,6 +307,11 @@ advice.
   > improve the PPE detector? You can change this in Settings at any time.
 - A check is never refused for consent. Until the worker answers,
   `training` is false.
+- **A check's photo is kept only once the worker has answered the notice**,
+  any version of it (`seen_version` isn't `null`). Until then the check is
+  stored without its photo (`photo.state: "not_stored"`, §2): the worker
+  hasn't been told yet that photos are kept. A later version of the notice
+  doesn't stop photos being kept while the app shows it again.
 - The server stamps each check with the worker's `training` choice at that
   moment (§2).
 - **Withdrawing** (`training: false` after a yes, §10, 2) sets
