@@ -11,7 +11,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request, Response
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, StrictInt
 from sqlalchemy.orm import Session
 
 from src.auth import service
@@ -23,6 +23,7 @@ from src.auth.deps import (
     require_user,
     require_worker,
 )
+from src.checks import consent
 from src.db.models import AuthSession, User, Worker
 from src.settings import settings
 
@@ -65,6 +66,13 @@ class WorkerMeResponse(BaseModel):
 class PinChangeRequest(BaseModel):
     current_pin: str = Field(min_length=1, max_length=32)
     new_pin: str = Field(min_length=1, max_length=32)
+
+
+class ConsentAnswer(BaseModel):
+    """The worker's answer to the photo notice (docs/checks-api.md §5)."""
+
+    version: StrictInt = Field(description="The notice version the app showed.")
+    training: StrictBool = Field(description="Whether photos may be kept longer for training.")
 
 
 class UserLoginRequest(BaseModel):
@@ -167,6 +175,31 @@ def worker_logout(request: Request, db: Session = Depends(db_session)) -> Respon
     if record is not None:
         service.revoke(db, record)
     return Response(status_code=204)
+
+
+@router.get("/worker/consent")
+def worker_consent(
+    record: AuthSession = Depends(require_worker()),
+    db: Session = Depends(db_session),
+) -> dict:
+    """The photo notice in force, and this worker's answer (docs/checks-api.md §5).
+
+    The app shows the notice when ``seen_version`` is null or older than
+    ``notice.version``.
+    """
+    return consent.get_consent(db, record.worker)
+
+
+@router.put("/worker/consent")
+def worker_answer_consent(
+    body: ConsentAnswer,
+    request: Request,
+    record: AuthSession = Depends(require_worker()),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Answer the notice the app showed; ``409 notice_changed`` if it has changed since."""
+    return consent.answer(db, record.worker_id, version=body.version, training=body.training,
+                          ip=client_ip(request))
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,11 @@ from src.admin import audit, runtime
 from src.admin.runtime import BY_NAME, DEFINITIONS, SettingDef
 from src.admin.views import iso
 from src.api.errors import ApiError
+from src.checks.retention import count_expired
 from src.db.models import AppSetting
+
+# The two photo retention periods (docs/checks-api.md §6, §7).
+RETENTION = ("photo_review_days", "photo_training_days")
 
 
 def _rows(db: Session) -> dict[str, AppSetting]:
@@ -44,6 +48,10 @@ def _validate(d: SettingDef, value: Any) -> Any:
         if not d.min <= value <= d.max:
             raise ApiError(422, "out_of_range",
                            f"{d.name} must be between {d.min:g} and {d.max:g}.", field=d.name)
+        if d.integer:
+            if value != int(value):
+                raise ApiError(422, "invalid", f"{d.name} must be a whole number.", field=d.name)
+            return int(value)
         return float(value)
     if d.type == "boolean":
         if not isinstance(value, bool):
@@ -70,8 +78,24 @@ def patch_settings(db: Session, patch: dict[str, Any], actor: str,
                  for name, value in patch.items()}
 
     rows = _rows(db)
+
+    def after(name: str) -> Any:
+        """The value in force once the patch is saved."""
+        if name in validated:
+            return validated[name] if validated[name] is not None else runtime.default(name)
+        return rows[name].value if name in rows else runtime.default(name)
+
+    # checks-api.md §7: saying yes to training can't mean a photo is kept for less time.
+    retention_sent = [n for n in RETENTION if n in validated]
+    if retention_sent and after("photo_training_days") < after("photo_review_days"):
+        field = "photo_training_days" if "photo_training_days" in validated else "photo_review_days"
+        raise ApiError(422, "out_of_range",
+                       "Photos kept for training can't be kept for less time than photos kept "
+                       f"for review ({after('photo_review_days')} days).", field=field)
+
     warnings: list[dict] = []
     changed = False
+    retention_changed: list[str] = []
     for name, value in validated.items():
         row = rows.get(name)
         old_override = row.value if row else None
@@ -89,6 +113,16 @@ def patch_settings(db: Session, patch: dict[str, Any], actor: str,
                      before={"value": old_override}, after={"value": value}, ip=ip)
         changed = True
         warnings.extend(_warnings(name, old_effective, new_effective))
+        if name in RETENTION and new_effective != old_effective:
+            retention_changed.append(name)
+    if retention_changed:
+        # checks-api.md §7: say what the next daily run will delete under the new periods.
+        review = after("photo_review_days")
+        due = count_expired(db, review, max(after("photo_training_days"), review))
+        photos = "no photos" if due == 0 else f"{due} photo{'' if due == 1 else 's'}"
+        warnings.extend({"code": "retention_changed", "setting": name, "count": due,
+                         "message": f"The next daily run will delete {photos} past the new "
+                                    "period."} for name in retention_changed)
     if changed:
         db.commit()
         runtime.invalidate()

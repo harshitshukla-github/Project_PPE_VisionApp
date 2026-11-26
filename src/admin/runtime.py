@@ -36,6 +36,8 @@ class SettingDef:
     choices: tuple[str, ...] | None = None
     # The dashboard shows the old and new value and asks before saving.
     confirm: bool = False
+    # A number that must be whole, such as a count of days.
+    integer: bool = False
 
 
 DEFINITIONS: tuple[SettingDef, ...] = (
@@ -63,6 +65,19 @@ DEFINITIONS: tuple[SettingDef, ...] = (
         "Whether check photos are kept, for signed-in workers who have seen the notice "
         "(checks-api.md §7). Off: checks are still stored, without photos.",
         confirm=True,
+    ),
+    # Shortening either one deletes photos at the next daily run, so both ask.
+    SettingDef(
+        "photo_review_days", "number", "ppb_photo_review_days",
+        "How many days a photo is kept for review, when the worker hasn't agreed to "
+        "training (checks-api.md §6).",
+        min=7, max=3650, step=1, confirm=True, integer=True,
+    ),
+    SettingDef(
+        "photo_training_days", "number", "ppb_photo_training_days",
+        "How many days a photo is kept when the worker agreed to training. Never shorter "
+        "than the review period.",
+        min=30, max=3650, step=1, confirm=True, integer=True,
     ),
 )
 BY_NAME: dict[str, SettingDef] = {d.name: d for d in DEFINITIONS}
