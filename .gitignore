@@ -17,6 +17,9 @@ data/raw/
 data/processed/
 data/splits/
 
+# Workers' check photos (PPB_PHOTO_DIR) — personal data, never in git
+data/photos/
+
 # Model weights (large files — track via MLflow or DVC)
 *.pt
 *.onnx

@@ -114,6 +114,12 @@ class Settings(BaseSettings):
     # relative path is from the project root, wherever the server was started.
     ppb_admin_dist: Path = Field(Path("admin/dist"), alias="PPB_ADMIN_DIST")
 
+    # Checks and their photos (docs/checks-api.md). Photos are kept only for
+    # signed-in workers who have seen the notice; this switches that off.
+    ppb_store_photos: bool = Field(True, alias="PPB_STORE_PHOTOS")
+    # Where kept photos live: outside anything served, never in git.
+    ppb_photo_dir: Path = Field(Path("data/photos"), alias="PPB_PHOTO_DIR")
+
     @model_validator(mode="after")
     def _paths_from_project_root(self) -> "Settings":
         """Every path setting, present or future, counts from the project root."""

@@ -366,7 +366,8 @@ class TestSettings:
     def test_each_setting_describes_itself(self, admin: Browser) -> None:
         listed = {s["name"]: s for s in admin.get("/settings").json()}
         assert set(listed) == {"confidence_threshold", "gemini_verify",
-                               "gemini_min_confidence", "worker_auth"}
+                               "gemini_min_confidence", "worker_auth", "store_photos"}
+        assert (listed["store_photos"]["type"], listed["store_photos"]["confirm"]) == ("boolean", True)
         threshold = listed["confidence_threshold"]
         assert (threshold["min"], threshold["max"], threshold["confirm"]) == (0.25, 0.80, True)
         assert listed["worker_auth"]["choices"] == ["optional", "required"]
