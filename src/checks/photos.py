@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import os
 import secrets
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from src.settings import settings
+
+if TYPE_CHECKING:
+    from src.db.models import Check
 
 _SUFFIXES = {"image/jpeg": ".jpg", "image/png": ".png"}
 
@@ -72,3 +76,32 @@ class FolderPhotoStore:
 def photo_store() -> PhotoStore:
     """The store in use: the folder named by ``PPB_PHOTO_DIR``."""
     return FolderPhotoStore(settings.ppb_photo_dir)
+
+
+def forget_photos(checks: Iterable[Check], store: PhotoStore) -> tuple[int, Exception | None]:
+    """Delete these checks' photos for good: each file, then its record.
+
+    A check is marked ``deleted`` only once its file is gone, so a record
+    never claims a deletion that didn't happen. If a file can't be deleted,
+    this stops there and returns the error with the count so far: the caller
+    saves what was done (and its audit entry), then reports the failure.
+    Running it again finishes the job, since a file already gone counts as
+    deleted. Nothing is committed here.
+
+    Args:
+        checks: Checks whose photo is kept, locked by the caller.
+        store: Where the photos are.
+
+    Returns:
+        How many photos were deleted, and the error that stopped it, if any.
+    """
+    now = datetime.now(timezone.utc)
+    deleted = 0
+    for check in checks:
+        try:
+            store.delete(check.photo_key)
+        except Exception as exc:  # noqa: BLE001 — returned, for the caller to report
+            return deleted, exc
+        check.photo_state, check.photo_key, check.photo_deleted_at = "deleted", None, now
+        deleted += 1
+    return deleted, None

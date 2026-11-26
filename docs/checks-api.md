@@ -214,6 +214,10 @@ policy already allows it. Opening a photo isn't recorded in the audit log
 "review": { "outcome": "compliant", "note": "…", "by": "supervisor.b@example.com", "at": "2026-12-03T08:02:51Z" }
 ```
 
+- The answer is `200` with `{ "check": … }`: the whole check as it is now
+  (§2), like `{ "worker": … }` and `{ "site": … }` in `admin-api.md`. A note
+  is trimmed, and one that is only spaces is stored as `null`.
+
 ### 4.4 `DELETE /workers/{worker_id}/photos`
 
 Deletes every stored photo of that worker. It doesn't delete the checks:
@@ -225,6 +229,10 @@ their verdicts and reviews stay, with `photo.state: "deleted"`.
 
 - It deletes the files, not only the records pointing at them, and it can't
   be undone. The dashboard says so and asks for confirmation first.
+- A check is marked `deleted` only once its file is gone. If a file can't be
+  deleted (a disk error, say), the request stops there and fails with a
+  server error. The photos deleted before it stay deleted and are counted in
+  that request's audit entry. Asking again deletes the rest.
 - Admins only (§10, 5). A worker asks their supervisor, who passes the
   request to an admin.
 - Withdrawing training consent (§5) doesn't delete photos at once: it puts
@@ -232,7 +240,8 @@ their verdicts and reviews stay, with `photo.state: "deleted"`.
   ones older than that.
 - The same is available on the server as
   `cli.py photos delete --worker W-0042`, for a request that arrives by
-  other means.
+  other means. It says how many photos it will delete and asks first
+  (`--yes` skips the question), and its audit entry has `actor: "cli"`.
 
 ## 5. Consent (mobile app)
 
