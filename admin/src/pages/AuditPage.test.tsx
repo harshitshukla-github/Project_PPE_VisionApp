@@ -1,8 +1,8 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { updateWorker } from "../api/client";
+import { setAdminTransport, updateWorker } from "../api/client";
 import type { MockBackend } from "../mock/backend";
 import { startMockBackend } from "../testing/harness";
 import { AuditPage } from "./AuditPage";
@@ -71,6 +71,21 @@ describe("AuditPage", () => {
     await user.click(screen.getByRole("button", { name: "Show details of worker.reset_pin on worker:W-0004" }));
 
     expect(within(screen.getByTestId("details-303")).getAllByText("Nothing recorded.")).toHaveLength(2);
+  });
+
+  it("asks the server once when a filter is applied, not twice", async () => {
+    const asked = vi.fn(backend.fetch);
+    setAdminTransport(asked);
+    const user = await open();
+    const auditCalls = () => asked.mock.calls.map(([url]) => url).filter((url) => url.startsWith("/api/v1/admin/audit"));
+    expect(auditCalls()).toHaveLength(1); // opening the page
+    asked.mockClear();
+
+    await user.selectOptions(screen.getByLabelText("Action"), "worker.create");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => expect(range()).toBe("1–1 of 1"));
+    expect(auditCalls()).toEqual(["/api/v1/admin/audit?action=worker.create&limit=25"]);
   });
 
   it("filters by action, by who (including the command line) and by site, then clears", async () => {
