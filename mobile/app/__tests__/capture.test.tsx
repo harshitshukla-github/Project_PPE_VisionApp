@@ -102,7 +102,7 @@ function AuthProbe() {
   return <Text testID="auth-probe">{label}</Text>;
 }
 
-function renderCapture() {
+async function renderCapture() {
   return render(
     <SessionProvider initialAuth={SIGNED_IN}>
       <AuthProbe />
@@ -112,7 +112,7 @@ function renderCapture() {
 }
 
 async function openCamera() {
-  renderCapture();
+  await renderCapture();
   await screen.findByText("Fit your full body in frame");
   mockTakePictureAsync.mockResolvedValueOnce({ uri: "file:///shot.jpg" });
 }
@@ -137,20 +137,20 @@ describe("CaptureScreen", () => {
     jobsAnswer = () => {
       throw new TypeError("Network request failed");
     };
-    renderCapture();
+    await renderCapture();
 
     expect(await screen.findByText(/Pick a job category on Home first/)).toBeTruthy();
   });
 
   it("prompts for camera permission when not yet granted", async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: false }, jest.fn()]);
-    renderCapture();
+    await renderCapture();
 
     expect(await screen.findByText("Grant camera access")).toBeTruthy();
   });
 
   it("shows the camera preview with a framing hint once identity + permission are ready", async () => {
-    renderCapture();
+    await renderCapture();
 
     expect(await screen.findByText("Fit your full body in frame")).toBeTruthy();
     expect(screen.getByTestId("camera-view")).toBeTruthy();
@@ -159,7 +159,7 @@ describe("CaptureScreen", () => {
   it("submits a captured photo and navigates to Result on success", async () => {
     await openCamera();
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
     expect(mockFetch).toHaveBeenLastCalledWith(
@@ -171,7 +171,7 @@ describe("CaptureScreen", () => {
   it("identifies the worker by token only: sends Authorization and no worker_id field", async () => {
     await openCamera();
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
 
     const [, init] = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
@@ -185,7 +185,7 @@ describe("CaptureScreen", () => {
     checkAnswer = () => fail(401, { detail: "Sign in again.", code: "not_authenticated" });
     await openCamera();
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
 
     await waitFor(() =>
       expect(screen.getByTestId("auth-probe")).toHaveTextContent("signed-out"),
@@ -198,7 +198,7 @@ describe("CaptureScreen", () => {
       fail(403, { detail: "Choose your own PIN first.", code: "pin_change_required" });
     await openCamera();
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
 
     await waitFor(() =>
       expect(screen.getByTestId("auth-probe")).toHaveTextContent("must-change-pin"),
@@ -210,7 +210,7 @@ describe("CaptureScreen", () => {
       fail(503, { detail: "Job requirements are temporarily unavailable. Try again shortly." });
     await openCamera();
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
 
     expect(await screen.findByText(/Try again shortly/)).toBeTruthy();
     expect(mockPush).not.toHaveBeenCalled();
@@ -223,7 +223,7 @@ describe("CaptureScreen", () => {
     };
     await openCamera();
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
 
     expect(
       await screen.findByText(/Can't reach server — check the URL in Settings/),
@@ -232,14 +232,14 @@ describe("CaptureScreen", () => {
   });
 
   it("picks from the gallery and submits when the camera isn't used", async () => {
-    renderCapture();
+    await renderCapture();
     await screen.findByText("Fit your full body in frame");
     mockLaunchImageLibraryAsync.mockResolvedValueOnce({
       canceled: false,
       assets: [{ uri: "file:///gallery.jpg" }],
     });
 
-    fireEvent.press(screen.getByText("Gallery"));
+    await fireEvent.press(screen.getByText("Gallery"));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
   });
@@ -250,7 +250,7 @@ describe("job list is refreshed before every check (docs/admin-api.md §2)", () 
     await openCamera();
     const before = requests().length;
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
 
     expect(requests().slice(before)).toEqual(["GET /jobs", "POST /compliance/check"]);
@@ -260,7 +260,7 @@ describe("job list is refreshed before every check (docs/admin-api.md §2)", () 
     await openCamera();
     jobsAnswer = () => ok(JOBS_WITHOUT_WELDER);
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
 
     expect(await screen.findByText(/Welder isn't available any more/)).toBeTruthy();
     expect(requests()).not.toContain("POST /compliance/check");
@@ -275,7 +275,7 @@ describe("job list is refreshed before every check (docs/admin-api.md §2)", () 
       throw new TypeError("Network request failed");
     };
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/result"));
     expect(requests()).toContain("POST /compliance/check");
@@ -289,7 +289,7 @@ describe("job list is refreshed before every check (docs/admin-api.md §2)", () 
       fail(422, { detail: "'welder' isn't an active job.", code: "unknown_job", field: "job_category" });
     await openCamera();
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
 
     expect(await screen.findByText(/Welder isn't available any more/)).toBeTruthy();
     expect(mockPush).not.toHaveBeenCalled();
@@ -301,7 +301,7 @@ describe("job list is refreshed before every check (docs/admin-api.md §2)", () 
       fail(422, { detail: "'welder' isn't an active job.", code: "unknown_job", field: "job_category" });
     await openCamera();
 
-    fireEvent.press(screen.getByTestId("shutter-button"));
+    await fireEvent.press(screen.getByTestId("shutter-button"));
 
     expect(await screen.findByText(/That job isn't available right now/)).toBeTruthy();
     expect(screen.getByTestId("camera-view")).toBeTruthy();

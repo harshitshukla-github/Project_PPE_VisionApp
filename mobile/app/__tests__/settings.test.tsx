@@ -36,7 +36,7 @@ beforeEach(async () => {
 
 describe("SettingsScreen account section", () => {
   it("hides Log out while nobody is signed in (Settings is reachable from Login)", async () => {
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     await screen.findByText("Not tested yet.");
     expect(screen.queryByTestId("logout-button")).toBeNull();
@@ -47,10 +47,10 @@ describe("SettingsScreen account section", () => {
       kind: "signedIn",
       worker: { worker_id: "W-0042", display_name: "Test Worker" },
     };
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     expect(await screen.findByText("Signed in as Test Worker (W-0042)")).toBeTruthy();
-    fireEvent.press(screen.getByTestId("logout-button"));
+    await fireEvent.press(screen.getByTestId("logout-button"));
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/login"));
     expect(mockSignOut).toHaveBeenCalledTimes(1);
@@ -59,7 +59,7 @@ describe("SettingsScreen account section", () => {
 
 describe("SettingsScreen", () => {
   it("shows 'Not tested yet' with no saved URL", async () => {
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     expect(await screen.findByText("Not tested yet.")).toBeTruthy();
     expect(mockFetch).not.toHaveBeenCalled();
@@ -77,7 +77,7 @@ describe("SettingsScreen", () => {
       }),
     });
 
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     expect(
       await screen.findByText("Connected ✓ — yolo26n on cpu"),
@@ -99,11 +99,11 @@ describe("SettingsScreen", () => {
       }),
     });
 
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     const input = screen.getByPlaceholderText("http://192.168.1.5:8000");
-    fireEvent.changeText(input, "  http://192.168.68.116:8000/  ");
-    fireEvent.press(screen.getByText("Save & Test Connection"));
+    await fireEvent.changeText(input, "  http://192.168.68.116:8000/  ");
+    await fireEvent.press(screen.getByText("Save & Test Connection"));
 
     expect(await screen.findByText("Connected ✓ — yolo26n on cpu")).toBeTruthy();
     await expect(AsyncStorage.getItem("@ppb/server_url")).resolves.toBe(
@@ -114,13 +114,13 @@ describe("SettingsScreen", () => {
   it("shows a 'not connected' error when the health check fails", async () => {
     mockFetch.mockRejectedValueOnce(new TypeError("Network request failed"));
 
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
-    fireEvent.changeText(
+    await fireEvent.changeText(
       screen.getByPlaceholderText("http://192.168.1.5:8000"),
       "http://192.168.68.116:8000",
     );
-    fireEvent.press(screen.getByText("Save & Test Connection"));
+    await fireEvent.press(screen.getByText("Save & Test Connection"));
 
     expect(
       await screen.findByText(/Not connected ✗ — Can't reach server/),
@@ -128,10 +128,10 @@ describe("SettingsScreen", () => {
   });
 
   it("shows an error and does not save when the input is empty", async () => {
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     await waitFor(() => screen.getByText("Not tested yet."));
-    fireEvent.press(screen.getByText("Save & Test Connection"));
+    await fireEvent.press(screen.getByText("Save & Test Connection"));
 
     expect(
       await screen.findByText("Not connected ✗ — Enter a server URL first."),
@@ -151,12 +151,12 @@ describe("SettingsScreen", () => {
       }),
     });
 
-    render(<SettingsScreen />);
-    fireEvent.changeText(
+    await render(<SettingsScreen />);
+    await fireEvent.changeText(
       screen.getByPlaceholderText("http://192.168.1.5:8000"),
       "http://192.168.68.116:8000",
     );
-    fireEvent.press(screen.getByText("Save & Test Connection"));
+    await fireEvent.press(screen.getByText("Save & Test Connection"));
 
     expect(
       await screen.findByText(

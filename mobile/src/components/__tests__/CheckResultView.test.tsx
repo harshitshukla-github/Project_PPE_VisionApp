@@ -24,48 +24,48 @@ const FAIL_RESULT: ComplianceCheckResponse = {
 };
 
 /** Fires the container's onLayout then the image's onLoad to resolve the bbox scale/offset. */
-function measurePhoto(containerWidth: number, naturalWidth: number, naturalHeight: number) {
-  fireEvent(screen.getByTestId("check-result-photo-container"), "layout", {
+async function measurePhoto(containerWidth: number, naturalWidth: number, naturalHeight: number) {
+  await fireEvent(screen.getByTestId("check-result-photo-container"), "layout", {
     nativeEvent: { layout: { x: 0, y: 0, width: containerWidth, height: 360 } },
   });
-  fireEvent(screen.getByTestId("check-result-photo"), "load", {
+  await fireEvent(screen.getByTestId("check-result-photo"), "load", {
     nativeEvent: { source: { width: naturalWidth, height: naturalHeight, uri: "file:///photo.jpg" } },
   });
 }
 
 describe("CheckResultView bbox overlay", () => {
-  it("scales detection boxes from the image's natural size to the rendered container", () => {
-    render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
+  it("scales detection boxes from the image's natural size to the rendered container", async () => {
+    await render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
 
     // naturalSize 1000x2000 into a 300x360 "contain" box:
     // scale = min(300/1000, 360/2000) = 0.18, offsetX = 60, offsetY = 0
-    measurePhoto(300, 1000, 2000);
+    await measurePhoto(300, 1000, 2000);
 
     const hardhatBox = screen.getByTestId("bbox-hardhat-0");
     expect(hardhatBox).toHaveStyle({ left: 78, top: 36, width: 36, height: 72 });
   });
 
-  it("colors a compliant item green, a no_* violation red, and person neutral gray", () => {
-    render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
-    measurePhoto(300, 1000, 2000);
+  it("colors a compliant item green, a no_* violation red, and person neutral gray", async () => {
+    await render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
+    await measurePhoto(300, 1000, 2000);
 
     expect(screen.getByTestId("bbox-hardhat-0")).toHaveStyle({ borderColor: "#1a7f37" });
     expect(screen.getByTestId("bbox-no_hardhat-1")).toHaveStyle({ borderColor: "#c0392b" });
     expect(screen.getByTestId("bbox-person-2")).toHaveStyle({ borderColor: "#607d8b" });
   });
 
-  it("labels each box with the title-cased class and confidence percentage", () => {
-    render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
-    measurePhoto(300, 1000, 2000);
+  it("labels each box with the title-cased class and confidence percentage", async () => {
+    await render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
+    await measurePhoto(300, 1000, 2000);
 
     expect(screen.getByText("Hardhat 90%")).toBeTruthy();
     expect(screen.getByText("No Hardhat 60%")).toBeTruthy();
   });
 
-  it("flips the label below the box when there's no room above (e.g. near the top of frame)", () => {
-    render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
+  it("flips the label below the box when there's no room above (e.g. near the top of frame)", async () => {
+    await render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
     // naturalSize 1000x2000 into a 300x360 "contain" box: scale = 0.18, offsetX = 60, offsetY = 0.
-    measurePhoto(300, 1000, 2000);
+    await measurePhoto(300, 1000, 2000);
 
     // hardhat: box top = 36px, well clear of the LABEL_HEIGHT(18) threshold -> label sits above it.
     expect(screen.getByText("Hardhat 90%")).toHaveStyle({ left: 76, top: 18 });
@@ -73,9 +73,9 @@ describe("CheckResultView bbox overlay", () => {
     expect(screen.getByText("No Hardhat 60%")).toHaveStyle({ left: 58, top: 11 });
   });
 
-  it("positions the label independently of the box, so a narrow box can't clip a long label", () => {
-    render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
-    measurePhoto(300, 1000, 2000);
+  it("positions the label independently of the box, so a narrow box can't clip a long label", async () => {
+    await render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
+    await measurePhoto(300, 1000, 2000);
 
     // The label is a sibling of the box View, not nested inside it — its own
     // style carries no width at all, so it can never be stretched or
@@ -86,17 +86,17 @@ describe("CheckResultView bbox overlay", () => {
     );
   });
 
-  it("shows a fallback message instead of boxes when the photo fails to load", () => {
-    render(<CheckResultView result={FAIL_RESULT} imageUri="file:///missing.jpg" />);
+  it("shows a fallback message instead of boxes when the photo fails to load", async () => {
+    await render(<CheckResultView result={FAIL_RESULT} imageUri="file:///missing.jpg" />);
 
-    fireEvent(screen.getByTestId("check-result-photo"), "error", { nativeEvent: {} });
+    await fireEvent(screen.getByTestId("check-result-photo"), "error", { nativeEvent: {} });
 
     expect(screen.getByText("Photo is no longer available on this device.")).toBeTruthy();
     expect(screen.queryByTestId("bbox-hardhat-0")).toBeNull();
   });
 
-  it("renders no boxes before the photo has loaded/measured", () => {
-    render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
+  it("renders no boxes before the photo has loaded/measured", async () => {
+    await render(<CheckResultView result={FAIL_RESULT} imageUri="file:///photo.jpg" />);
 
     expect(screen.queryByTestId("bbox-hardhat-0")).toBeNull();
   });
@@ -127,8 +127,8 @@ describe("CheckResultView NEEDS_REVIEW (third verdict)", () => {
     missing_equipment: ["safety_vest", "gloves"],
   });
 
-  it("is amber and non-accusing — never the red FAIL treatment", () => {
-    render(<CheckResultView result={REVIEW} imageUri={null} />);
+  it("is amber and non-accusing — never the red FAIL treatment", async () => {
+    await render(<CheckResultView result={REVIEW} imageUri={null} />);
 
     expect(screen.getByText("Needs review")).toHaveStyle({ color: "#b8860b" });
     expect(screen.getByText("?")).toHaveStyle({ color: "#b8860b" });
@@ -138,8 +138,8 @@ describe("CheckResultView NEEDS_REVIEW (third verdict)", () => {
     expect(screen.queryByText("NEEDS_REVIEW")).toBeNull();
   });
 
-  it("says what couldn't be verified instead of listing it as missing equipment", () => {
-    render(<CheckResultView result={REVIEW} imageUri={null} />);
+  it("says what couldn't be verified instead of listing it as missing equipment", async () => {
+    await render(<CheckResultView result={REVIEW} imageUri={null} />);
 
     expect(
       screen.getByText("Couldn't verify: Safety Vest, Gloves — ask your supervisor to confirm."),
@@ -148,8 +148,8 @@ describe("CheckResultView NEEDS_REVIEW (third verdict)", () => {
     expect(screen.queryByText(/missing your/i)).toBeNull();
   });
 
-  it("falls back to a generic message when nothing specific is listed", () => {
-    render(
+  it("falls back to a generic message when nothing specific is listed", async () => {
+    await render(
       <CheckResultView
         result={makeResult({ verdict: "NEEDS_REVIEW", missing_equipment: [] })}
         imageUri={null}
@@ -161,8 +161,8 @@ describe("CheckResultView NEEDS_REVIEW (third verdict)", () => {
     ).toBeTruthy();
   });
 
-  it("renders an unrecognised future verdict as needs-review, not as a failure", () => {
-    render(
+  it("renders an unrecognised future verdict as needs-review, not as a failure", async () => {
+    await render(
       <CheckResultView
         result={makeResult({ verdict: "SOMETHING_NEW" as never, missing_equipment: ["goggles"] })}
         imageUri={null}
@@ -174,8 +174,8 @@ describe("CheckResultView NEEDS_REVIEW (third verdict)", () => {
     expect(screen.queryByText("✗")).toBeNull();
   });
 
-  it("still lists unverifiable equipment separately in amber", () => {
-    render(
+  it("still lists unverifiable equipment separately in amber", async () => {
+    await render(
       <CheckResultView
         result={makeResult({
           verdict: "NEEDS_REVIEW",
@@ -200,8 +200,8 @@ describe("CheckResultView Gemini second opinion", () => {
     ],
   };
 
-  it("shows what Gemini saw when it settles a PASS, since the vest isn't in detections", () => {
-    render(
+  it("shows what Gemini saw when it settles a PASS, since the vest isn't in detections", async () => {
+    await render(
       <CheckResultView
         result={makeResult({
           verdict: "PASS",
@@ -220,8 +220,8 @@ describe("CheckResultView Gemini second opinion", () => {
     expect(screen.getByText("Double-checked with a closer look at the photo.")).toBeTruthy();
   });
 
-  it("shows a confirmed not-worn finding in red when Gemini decided a FAIL", () => {
-    render(
+  it("shows a confirmed not-worn finding in red when Gemini decided a FAIL", async () => {
+    await render(
       <CheckResultView
         result={makeResult({
           verdict: "FAIL",
@@ -246,10 +246,10 @@ describe("CheckResultView Gemini second opinion", () => {
     expect(screen.getByText("bare torso, t-shirt only")).toBeTruthy();
   });
 
-  it("never presents a low-confidence not_worn as an accusation on NEEDS_REVIEW", () => {
+  it("never presents a low-confidence not_worn as an accusation on NEEDS_REVIEW", async () => {
     // The backend downgrades this finding to "unknown" (below its confidence
     // threshold) — so the app must not show it in red or quote its reason.
-    render(
+    await render(
       <CheckResultView
         result={makeResult({
           verdict: "NEEDS_REVIEW",
@@ -273,8 +273,8 @@ describe("CheckResultView Gemini second opinion", () => {
     expect(screen.queryByText(/Not seen/)).toBeNull();
   });
 
-  it("does show an uncertain finding's reason — it tells the worker how to retake", () => {
-    render(
+  it("does show an uncertain finding's reason — it tells the worker how to retake", async () => {
+    await render(
       <CheckResultView
         result={makeResult({
           verdict: "NEEDS_REVIEW",
@@ -296,9 +296,9 @@ describe("CheckResultView Gemini second opinion", () => {
     expect(screen.getByText("hands are out of frame")).toBeTruthy();
   });
 
-  it("renders a legacy result with no verdict_source or verification", () => {
+  it("renders a legacy result with no verdict_source or verification", async () => {
     // History entries saved before these fields existed.
-    render(<CheckResultView result={makeResult({ verdict: "PASS" })} imageUri={null} />);
+    await render(<CheckResultView result={makeResult({ verdict: "PASS" })} imageUri={null} />);
 
     expect(screen.getByText("PASS")).toBeTruthy();
     expect(screen.queryByText("What we checked")).toBeNull();

@@ -36,7 +36,7 @@ const FAIL_RESULT: ComplianceCheckResponse = {
   gemini_invoked: true,
 };
 
-function renderDetail() {
+async function renderDetail() {
   return render(
     <SessionProvider initialAuth={SIGNED_IN}>
       <HistoryDetailScreen />
@@ -55,7 +55,7 @@ describe("HistoryDetailScreen", () => {
   it("shows a not-found state for an unknown id", async () => {
     mockParams = { id: "does-not-exist" };
 
-    renderDetail();
+    await renderDetail();
 
     expect(await screen.findByText("Not found")).toBeTruthy();
   });
@@ -82,7 +82,7 @@ describe("HistoryDetailScreen", () => {
     );
     mockParams = { id: entry.id };
 
-    renderDetail();
+    await renderDetail();
 
     expect(await screen.findByText("Needs review")).toBeTruthy();
     expect(
@@ -97,7 +97,7 @@ describe("HistoryDetailScreen", () => {
     const [entry] = await addHistoryEntry(FAIL_RESULT, "file:///legacy.jpg");
     mockParams = { id: entry.id };
 
-    renderDetail();
+    await renderDetail();
 
     expect(await screen.findByText("FAIL")).toBeTruthy();
     expect(screen.queryByText("What we checked")).toBeNull();
@@ -107,7 +107,7 @@ describe("HistoryDetailScreen", () => {
     const [entry] = await addHistoryEntry(FAIL_RESULT, "file:///photo.jpg");
     mockParams = { id: entry.id };
 
-    renderDetail();
+    await renderDetail();
 
     expect(await screen.findByText("FAIL")).toBeTruthy();
     expect(screen.getByText("You're missing your goggles and hardhat.")).toBeTruthy();
