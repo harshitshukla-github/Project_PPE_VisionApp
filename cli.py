@@ -79,6 +79,13 @@ sites_app = typer.Typer(
 )
 app.add_typer(sites_app, name="sites")
 
+photos_app = typer.Typer(
+    help="Worker photos kept with checks: delete one worker's photos.",
+    rich_markup_mode="markdown",
+    no_args_is_help=True,
+)
+app.add_typer(photos_app, name="photos")
+
 console = Console()
 
 # ---------------------------------------------------------------------------
@@ -1192,6 +1199,57 @@ def sites_create_cmd(
 
     _run_account_command(action)
     console.print(f"[green]Created site {key} ({display_name}).[/green]")
+
+
+# ---------------------------------------------------------------------------
+# photos commands (docs/checks-api.md §4.4)
+# ---------------------------------------------------------------------------
+
+@photos_app.command("delete")
+def photos_delete_cmd(
+    worker: str = typer.Option(..., "--worker", help="The worker's ID, e.g. W-0042."),
+    yes: bool = typer.Option(False, "--yes", help="Don't ask before deleting."),
+) -> None:
+    """
+    Delete every stored photo of one worker, **for good**. Their checks stay.
+
+    For a request that doesn't come through the dashboard. Recorded in the
+    audit log with actor `cli`.
+    """
+    from sqlalchemy import select
+
+    from src.admin import audit
+    from src.admin.checks import delete_worker_photos, kept_photo_count
+    from src.auth.crypto import normalize_worker_code
+    from src.db.models import Worker
+
+    code = normalize_worker_code(worker)
+
+    def photos(n: int) -> str:
+        return f"{n} photo{'' if n == 1 else 's'}"
+
+    def action(db) -> str:
+        target = db.scalar(select(Worker).where(Worker.worker_code == code))
+        if target is None:
+            raise ValueError(f"No worker {code}.")
+        who = f"{code} ({target.display_name})"
+        count = kept_photo_count(db, target)
+        if count == 0:
+            return f"{who} has no stored photos."
+        if not yes and not typer.confirm(f"Delete {photos(count)} of {who}? "
+                                         "This can't be undone."):
+            console.print("Nothing deleted.")
+            raise typer.Exit(code=1)
+        try:
+            deleted = delete_worker_photos(db, target, audit.CLI_ACTOR, None)
+        except OSError as exc:
+            console.print(f"[red]A photo couldn't be deleted: {exc}[/red]\n"
+                          "The ones before it are deleted and recorded. Run the command "
+                          "again to delete the rest.")
+            raise typer.Exit(code=1) from None
+        return f"[green]Deleted {photos(deleted)} of {who}. Their checks are kept.[/green]"
+
+    console.print(_run_account_command(action))
 
 
 # ---------------------------------------------------------------------------

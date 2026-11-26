@@ -9,17 +9,17 @@ modules in :mod:`src.admin` scope what a supervisor sees to their own site.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.admin import audit as audit_log
-from src.admin import jobs, settings_api, sites, users, workers
+from src.admin import checks, jobs, settings_api, sites, users, workers
 from src.admin.common import applies_within_s, page
 from src.admin.metrics import load_ap50
-from src.admin.views import audit_view, user_view, worker_view
+from src.admin.views import audit_view, check_view, user_view, worker_view
 from src.api.deps import get_detector
 from src.auth.deps import client_ip, db_session, require_user
 from src.db.matrix import ITEM_ORDER
@@ -98,6 +98,26 @@ class WorkerPatch(BaseModel):
     display_name: str | None = Field(None, max_length=500)
     site: str | None = Field(None, max_length=200)
     is_active: bool | None = None
+
+
+class ReviewIn(BaseModel):
+    # Checked in src.admin.checks, so a missing outcome or a long note gets
+    # `422 invalid` with its field (docs/checks-api.md §3).
+    outcome: str | None = Field(None, max_length=50)
+    note: str | None = Field(None, max_length=5000)
+    replace: bool = False
+
+
+# A check ID: anything outside PostgreSQL's bigint is malformed, not missing.
+CheckId = Annotated[int, Path(ge=1, le=2**63 - 1)]
+
+# docs/checks-api.md §4.2: a shared computer's cache shouldn't keep workers'
+# photos, and the response names no file (a name could give the worker away).
+PHOTO_HEADERS = {
+    "Cache-Control": "private, no-store",
+    "Content-Disposition": "inline",
+    "X-Content-Type-Options": "nosniff",
+}
 
 
 def _sent(body: BaseModel, *exclude: str) -> dict[str, Any]:
@@ -297,6 +317,65 @@ def reset_pin(worker_id: str, request: Request, record: AuthSession = ANY_USER,
               db: Session = Depends(db_session)) -> dict:
     return {"one_time_pin": workers.reset_pin(db, record.user, worker_id, record.user.email,
                                               client_ip(request))}
+
+
+@router.delete("/workers/{worker_id}/photos")
+def delete_worker_photos(worker_id: str, request: Request, record: AuthSession = ADMIN,
+                         db: Session = Depends(db_session)) -> dict:
+    """docs/checks-api.md §4.4: every kept photo of the worker, for good. Their checks stay."""
+    worker = workers.get_worker(db, record.user, worker_id)
+    return {"deleted": checks.delete_worker_photos(db, worker, record.user.email,
+                                                   client_ip(request))}
+
+
+# ---------------------------------------------------------------------------
+# Checks (docs/checks-api.md §4)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/checks")
+def list_checks(
+    site: str | None = Query(None, max_length=200),
+    worker: str | None = Query(None, max_length=200),
+    job: str | None = Query(None, max_length=200),
+    verdict: str | None = Query(None, max_length=32),
+    reviewed: bool | None = None,
+    signed_in: bool | None = None,
+    from_: datetime | None = Query(None, alias="from"),
+    to: datetime | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    cursor: str | None = Query(None, max_length=500),
+    record: AuthSession = ANY_USER,
+    db: Session = Depends(db_session),
+) -> dict:
+    """Newest first. Items leave out `detections` and `verification`; the detail has them."""
+    rows, next_cursor, total = checks.list_checks(
+        db, record.user, site=site, worker=worker, job=job, verdict=verdict, reviewed=reviewed,
+        signed_in=signed_in, start=from_, end=to, limit=limit, cursor=cursor)
+    return page([check_view(c, full=False) for c in rows], next_cursor, total)
+
+
+@router.get("/checks/{check_id}")
+def get_check(check_id: CheckId, record: AuthSession = ANY_USER,
+              db: Session = Depends(db_session)) -> dict:
+    return check_view(checks.get_check(db, record.user, check_id))
+
+
+@router.get("/checks/{check_id}/photo")
+def get_check_photo(check_id: CheckId, record: AuthSession = ANY_USER,
+                    db: Session = Depends(db_session)) -> Response:
+    """The photo as kept: the upload, with only its location removed (§2)."""
+    data, content_type = checks.read_photo(db, record.user, check_id)
+    return Response(data, media_type=content_type, headers=PHOTO_HEADERS)
+
+
+@router.post("/checks/{check_id}/review")
+def review_check(body: ReviewIn, request: Request, check_id: CheckId,
+                 record: AuthSession = ANY_USER, db: Session = Depends(db_session)) -> dict:
+    check = checks.review_check(db, record.user, check_id, outcome=body.outcome,
+                                note=body.note, replace=body.replace, actor=record.user.email,
+                                ip=client_ip(request))
+    return {"check": check_view(check)}
 
 
 # ---------------------------------------------------------------------------

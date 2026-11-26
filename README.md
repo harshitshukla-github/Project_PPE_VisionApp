@@ -250,6 +250,33 @@ dashboard calls, under `/api/v1/admin`, behind the dashboard login.
 
 After pulling, run `uv run python cli.py db migrate` to reach migration `0003`.
 
+## Checks and photos (Phase 6)
+
+The contract is [`docs/checks-api.md`](docs/checks-api.md). Every check that
+gets a verdict is stored with what it was judged against, and the response
+carries its `check_id`. Storing never fails a check: if it can't be stored,
+the worker still gets their verdict and the server logs why.
+
+- **Photos** are kept only for a signed-in worker who has answered the photo
+  notice in the app, and only while the `store_photos` setting is on. Only
+  their location (the EXIF GPS tags) is removed. They are files under
+  `PPB_PHOTO_DIR` (default `data/photos/`, ignored by git); keep that folder
+  out of anything a web server serves. A photo leaves only through
+  `/admin/checks/{id}/photo`, for admins and the supervisor of the check's
+  site.
+- **Review.** The dashboard lists checks from `/admin/checks`. A supervisor
+  reviews their own site's checks, once; an admin can replace a review. The
+  verdict itself never changes.
+- **Deleting a worker's photos** (admins): `DELETE /admin/workers/{id}/photos`,
+  which the dashboard's Workers page calls, or on the server for a request
+  that arrives another way. The checks stay.
+
+```bash
+uv run python cli.py photos delete --worker W-0042      # says how many and asks; --yes skips that
+```
+
+After pulling, run `uv run python cli.py db migrate` to reach migration `0004`.
+
 ## Admin dashboard
 
 The pages are in [`admin/`](admin/README.md). Build them once and the API server
