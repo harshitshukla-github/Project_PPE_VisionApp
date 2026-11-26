@@ -488,10 +488,10 @@ LOG_LEVEL=INFO
 | P0    | Stack selection & architecture                        | ✅ Complete  |
 | P1    | Vision module — dual YOLO training                    | ✅ Complete  |
 | P2    | FastAPI inference server + compliance API             | ✅ Complete  |
-| P3    | React Native mobile app (camera + upload)             | ✅ Complete — tested on a phone with login and checks; open: the photo notice (comes with P6), and the app icon (in review, #38) |
+| P3    | React Native mobile app (camera + upload)             | ✅ Complete — tested on a phone with login and checks; app icon merged (#38). Open: the photo notice (P6; the server's endpoints are ready), and naming the app "PPB Check" |
 | P4    | Gemini explanations + second opinion on NEEDS_REVIEW  | ✅ Complete  |
 | P5    | Job PPE Matrix in PostgreSQL + admin dashboard (React + Vite) | 🔄 Finishing — matrix in Postgres, admin API (`docs/admin-api.md`), dashboard pages served at `/admin/`, and the re-test fixes all done; checked in a real browser on `localhost` and a LAN address; the review follow-ups merged (#32). Open: three undecided points (confirmations on reset and deactivate, editing your own name, requirement order) |
-| P6    | Checks, worker photos and supervisor review (photos kept for model training) | 🔄 Contract agreed (`docs/checks-api.md`, #34); build starting: storing checks and the endpoints (backend), the photo notice in the app and the Checks pages (dashboard) |
+| P6    | Checks, worker photos and supervisor review (photos kept for model training) | 🔄 Backend done (#39, #41, #42, against `docs/checks-api.md`): every check stored, its photo kept once the worker has answered the notice (location removed); the dashboard's checks endpoints (list, photo, review, deleting a worker's photos); the notice and consent endpoints; retention of 90 / 730 days with a daily purge by the server; `cli.py photos delete \| purge \| export --consented`. Open: the Checks pages (#40, checked against the real endpoints), the photo notice in the app (its wording goes past the privacy check first), and the notice rule in the contract (§2, §5) |
 | P7    | Login: admin & supervisor accounts, worker login (built into FastAPI; contract `docs/auth-api.md`) | ✅ Built (backend, app, dashboard login) — switch to `PPB_WORKER_AUTH=required` per `docs/auth-api.md` §5 pending |
 | P8    | Live video mode                                       | ⬜ Future    |
 
