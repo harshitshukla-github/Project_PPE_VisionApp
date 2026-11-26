@@ -26,6 +26,11 @@ export interface MockState {
   audit: AuditEntry[];
   /** Stored checks, as docs/checks-api.md §2 describes them. */
   checks: Check[];
+  /**
+   * For tests: "Delete photos" fails after this many files, as a disk error would
+   * (checks-api §4.4). null: it never fails.
+   */
+  photoFileFailsAfter: number | null;
   nextUserId: number;
   nextAuditId: number;
 }
@@ -235,6 +240,8 @@ export function seedState(now: Date = new Date()): MockState {
       id: 303, at: iso(1), actor: "supervisor.b@example.com", action: "worker.reset_pin", target: "worker:W-0004",
       site: "pune_tower_b", before: null, after: null, ip: "192.168.29.31",
     },
+    // `photos.purge` and `photos.export` (checks-api §8) are written by the server's own jobs, which
+    // the stand-in doesn't run; the Audit log lists them as actions to filter by.
   ];
 
   return {
@@ -248,6 +255,7 @@ export function seedState(now: Date = new Date()): MockState {
     workers,
     audit,
     checks: seedChecks(now, jobs, workers, items),
+    photoFileFailsAfter: null,
     nextUserId: 200,
     nextAuditId: 304,
   };

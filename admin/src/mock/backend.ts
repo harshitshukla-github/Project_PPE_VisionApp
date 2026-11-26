@@ -494,9 +494,10 @@ export function createMockBackend(options: MockOptions): MockBackend {
         });
       }
       if ((name === "photo_review_days" || name === "photo_training_days") && effective !== was.value) {
+        // One per period changed, with the number in `count` too (checks-api §7).
         const doomed = photosPastRetention();
         warnings.push({
-          code: "retention_changed", setting: name,
+          code: "retention_changed", setting: name, count: doomed,
           message: `The next daily run will delete ${doomed} photo${doomed === 1 ? "" : "s"} older than the new period.`,
         });
       }
@@ -805,6 +806,13 @@ export function createMockBackend(options: MockOptions): MockBackend {
     let deleted = 0;
     for (const c of state.checks) {
       if (c.worker_id.toLowerCase() === worker.worker_id.toLowerCase() && c.photo.state === "kept") {
+        // checks-api §4.4: a file that can't be deleted stops the request with a plain 500. The
+        // ones before it stay deleted and are counted in the audit entry; asking again deletes the rest.
+        if (state.photoFileFailsAfter !== null && deleted >= state.photoFileFailsAfter) {
+          record(user, "worker.photos_delete", `worker:${worker.worker_id}`, worker.site, null, { deleted });
+          state.photoFileFailsAfter = null; // the disk recovers, so asking again works
+          return new Response("Internal Server Error", { status: 500, headers: { "Content-Type": "text/plain" } });
+        }
         c.photo = { ...c.photo, state: "deleted" };
         deleted++;
       }

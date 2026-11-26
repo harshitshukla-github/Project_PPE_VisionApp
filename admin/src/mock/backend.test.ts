@@ -578,6 +578,27 @@ describe("checks (docs/checks-api.md)", () => {
     it("answers 404 for a worker who doesn't exist", async () => {
       expect((await call("DELETE", "/workers/NOBODY/photos")).status).toBe(404);
     });
+
+    it("stops at a file it can't delete with a plain 500; the ones before stay deleted and audited, and again deletes the rest", async () => {
+      // The sample data gives each worker one check; give this worker a second stored photo.
+      const [first, second] = backend.state.checks.filter((c) => c.photo.state === "kept" && c.signed_in);
+      second.worker_id = first.worker_id;
+      const worker = first.worker_id;
+      const kept = () => backend.state.checks.filter((c) => c.worker_id === worker && c.photo.state === "kept").length;
+      const before = kept();
+      expect(before).toBe(2);
+      backend.state.photoFileFailsAfter = 1;
+
+      const response = await backend.fetch(`/api/v1/admin/workers/${worker}/photos`, { method: "DELETE" });
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("Content-Type")).toBe("text/plain"); // not JSON
+      expect(kept()).toBe(before - 1);
+      expect(backend.state.audit.at(-1)).toMatchObject({ action: "worker.photos_delete", after: { deleted: 1 } });
+
+      expect((await call("DELETE", `/workers/${worker}/photos`)).body).toEqual({ deleted: before - 1 });
+      expect(kept()).toBe(0);
+    });
   });
 
   describe("photo settings (§7)", () => {
@@ -611,7 +632,23 @@ describe("checks (docs/checks-api.md)", () => {
       const res = await call("PATCH", "/settings", { photo_review_days: 7 });
       expect(res.status).toBe(200);
       const warning = res.body.warnings.find((w: { code: string }) => w.code === "retention_changed");
-      expect(warning).toMatchObject({ setting: "photo_review_days", message: expect.stringMatching(/will delete \d+ photos?/) });
+      expect(warning).toMatchObject({
+        setting: "photo_review_days",
+        count: expect.any(Number),
+        message: expect.stringMatching(/will delete \d+ photos?/),
+      });
+      expect(warning.message).toContain(String(warning.count));
+    });
+
+    it("warns once per period changed", async () => {
+      const res = await call("PATCH", "/settings", { photo_review_days: 30, photo_training_days: 400 });
+      const settings = res.body.warnings.filter((w: { code: string }) => w.code === "retention_changed").map((w: { setting: string }) => w.setting);
+      expect(settings.sort()).toEqual(["photo_review_days", "photo_training_days"]);
+    });
+
+    it("stores a note that is only spaces as null (§4.3)", async () => {
+      const c = backend.state.checks.find((x) => x.verdict === "NEEDS_REVIEW" && !x.review)!;
+      expect((await call("POST", `/checks/${c.id}/review`, { outcome: "compliant", note: "   " })).body.check.review.note).toBeNull();
     });
   });
 });

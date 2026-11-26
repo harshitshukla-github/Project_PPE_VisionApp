@@ -16,7 +16,7 @@ const ACTIONS = [
   "user.create", "user.update", "user.reset_password",
   "worker.create", "worker.update", "worker.reset_pin",
   // docs/checks-api.md §8
-  "check.review", "worker.photos_delete", "worker.consent", "photos.purge",
+  "check.review", "worker.photos_delete", "worker.consent", "photos.purge", "photos.export",
 ];
 
 interface Filters {

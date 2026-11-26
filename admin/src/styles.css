@@ -754,12 +754,14 @@ select[aria-invalid="true"] {
   stroke-width: 3;
 }
 
+/* The label's outline is the theme's surface colour, so the text stands out from it in both
+   themes (dark mode's light-blue text on a white outline was about 2.7:1). */
 .box text {
   fill: var(--accent);
   font-family: system-ui, sans-serif;
   font-weight: 700;
   paint-order: stroke;
-  stroke: #fff;
+  stroke: var(--surface);
   stroke-width: 6;
 }
 

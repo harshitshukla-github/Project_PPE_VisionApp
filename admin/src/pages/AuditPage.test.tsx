@@ -36,6 +36,15 @@ async function open() {
 }
 
 describe("AuditPage", () => {
+  it("offers Phase 6's actions to filter by, including the server's own purge and export (checks-api §8)", async () => {
+    await open();
+
+    const options = Array.from((screen.getByLabelText("Action") as HTMLSelectElement).options).map((o) => o.value);
+    expect(options).toEqual(
+      expect.arrayContaining(["check.review", "worker.photos_delete", "worker.consent", "photos.purge", "photos.export"]),
+    );
+  });
+
   it("lists the log newest first, with a total", async () => {
     await open();
 

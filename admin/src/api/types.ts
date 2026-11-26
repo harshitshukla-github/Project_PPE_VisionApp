@@ -55,6 +55,8 @@ export interface Warning {
   item?: string;
   /** Set on the settings warnings: the setting it is about. */
   setting?: string;
+  /** Set on `retention_changed`: how many photos the next daily run will delete (checks-api §7). */
+  count?: number;
 }
 
 // ---- sites (§3) ------------------------------------------------------------

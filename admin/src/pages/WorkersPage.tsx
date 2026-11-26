@@ -28,6 +28,20 @@ interface Filters {
 
 const NO_FILTERS: Filters = { search: "", site: "", status: "", locked: false };
 
+/** "Delete photos" stopped part way (a `500`, checks-api §4.4): what that means for the person. */
+class PartlyDeleted extends Error {
+  readonly problem: Problem;
+  constructor(name: string) {
+    super("Deleting photos stopped part way.");
+    this.problem = {
+      message:
+        `Something went wrong part way through deleting ${name}'s photos. The ones already deleted stay deleted; ` +
+        "choose Delete photos again to delete the rest.",
+      tone: "error",
+    };
+  }
+}
+
 /**
  * How many of a worker's photos are still stored, to say in the confirmation
  * (docs/checks-api.md §9). No endpoint gives the number, so it is counted from
@@ -101,7 +115,7 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
     try {
       await action();
     } catch (err) {
-      setMessage(problemFrom(err, "Couldn't save that."));
+      setMessage(err instanceof PartlyDeleted ? err.problem : problemFrom(err, "Couldn't save that."));
     } finally {
       setBusy(false);
     }
@@ -169,15 +183,25 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
           onConfirm={() =>
             void run(async () => {
               const { worker } = photoDelete;
-              const { deleted } = await deleteWorkerPhotos(worker.worker_id);
-              setPhotoDelete(null);
-              setDone(`Deleted ${deleted} photo${deleted === 1 ? "" : "s"} of ${worker.display_name} (${worker.worker_id}).`);
+              try {
+                const { deleted } = await deleteWorkerPhotos(worker.worker_id);
+                setDone(`Deleted ${deleted} photo${deleted === 1 ? "" : "s"} of ${worker.display_name} (${worker.worker_id}).`);
+              } catch (err) {
+                // checks-api §4.4: a file that can't be deleted stops the request with a plain 500.
+                // The ones before it are gone for good, and asking again deletes the rest.
+                if (err instanceof ApiError && err.status === 500) {
+                  throw new PartlyDeleted(worker.display_name);
+                }
+                throw err;
+              } finally {
+                setPhotoDelete(null);
+              }
             })
           }
         >
           <p>
-            This deletes all {photoDelete.count} stored photo{photoDelete.count === 1 ? "" : "s"} of {photoDelete.worker.display_name} (
-            {photoDelete.worker.worker_id}). Their checks, verdicts and reviews stay.
+            This deletes {photoDelete.count === 1 ? "the 1 stored photo" : `all ${photoDelete.count} stored photos`} of{" "}
+            {photoDelete.worker.display_name} ({photoDelete.worker.worker_id}). Their checks, verdicts and reviews stay.
           </p>
           <p>
             <strong>It can&apos;t be undone.</strong>
