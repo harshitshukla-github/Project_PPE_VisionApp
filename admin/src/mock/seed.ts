@@ -6,7 +6,7 @@
  * versions, sites, people and audit entries are made up so every page has
  * something to show.
  */
-import type { AdminUser, AuditEntry, Item, Job, Requirement, Worker } from "../api/types";
+import type { AdminUser, AuditEntry, Check, Detection, Item, Job, Requirement, Verdict, Worker } from "../api/types";
 
 export interface SeedSite {
   key: string;
@@ -24,8 +24,116 @@ export interface MockState {
   users: AdminUser[];
   workers: Worker[];
   audit: AuditEntry[];
+  /** Stored checks, as docs/checks-api.md §2 describes them. */
+  checks: Check[];
+  /**
+   * For tests: "Delete photos" fails after this many files, as a disk error would
+   * (checks-api §4.4). null: it never fails.
+   */
+  photoFileFailsAfter: number | null;
   nextUserId: number;
   nextAuditId: number;
+}
+
+// Where each item sits on a 1080×1440 portrait photo of a worker, for the sample boxes.
+const PHOTO = { width: 1080, height: 1440 };
+const BOXES: Record<string, [number, number, number, number]> = {
+  person: [210, 120, 870, 1420],
+  hardhat: [400, 120, 680, 310],
+  no_hardhat: [420, 150, 660, 360],
+  goggles: [440, 300, 640, 370],
+  face_shield: [420, 280, 660, 470],
+  mask: [470, 380, 610, 460],
+  ear_protection: [390, 280, 690, 380],
+  safety_vest: [320, 520, 760, 960],
+  no_vest: [330, 520, 750, 950],
+  harness: [330, 500, 750, 1000],
+  gloves: [230, 900, 370, 1040],
+  boots: [360, 1300, 720, 1420],
+};
+
+/**
+ * About 45 sample checks over the last ten days: mostly PASS, some FAIL and
+ * NEEDS_REVIEW, a few already reviewed, a few sent without a login under an
+ * ID nobody has (no site, no photo), and some photos deleted. Deterministic,
+ * so tests can count on them.
+ */
+function seedChecks(now: Date, jobs: Job[], workers: Worker[], items: Item[]): Check[] {
+  const iso = (hoursAgo: number) => new Date(now.getTime() - hoursAgo * 3_600_000).toISOString();
+  const detectable = new Set(items.filter((i) => i.detectable).map((i) => i.key));
+  const checks: Check[] = [];
+  for (let i = 0; i < 45; i++) {
+    const id = 1000 + i;
+    const job = jobs[i % jobs.length];
+    const signedIn = i % 15 !== 7; // three checks without a login
+    const worker = workers[(i * 7) % workers.length];
+    const required = job.requirements.filter((r) => r.mode === "required").map((r) => r.item);
+    const pending = job.requirements.filter((r) => r.mode === "pending").map((r) => r.item);
+    const verdict: Verdict = i % 5 === 1 ? "NEEDS_REVIEW" : i % 9 === 4 ? "FAIL" : "PASS";
+
+    // NEEDS_REVIEW: one required, detectable item wasn't found. FAIL: a violation class was.
+    const missing = verdict === "NEEDS_REVIEW" ? [required.filter((k) => detectable.has(k)).at(-1)!] : [];
+    const violations = verdict === "FAIL" ? ["no_hardhat"] : [];
+    const found = required.filter((k) => detectable.has(k) && !missing.includes(k) && !(verdict === "FAIL" && k === "hardhat"));
+    const detections: Detection[] = ["person", ...found, ...violations].map((k, n) => ({
+      class: k,
+      confidence: Math.round((0.93 - n * 0.04) * 100) / 100,
+      bbox: BOXES[k] ?? BOXES.person,
+    }));
+
+    const reviewed = verdict === "NEEDS_REVIEW" && i % 3 === 0;
+    const supervisor = worker.site === "pune_tower_b" ? "supervisor.b@example.com" : "supervisor.c@example.com";
+    const photoState = !signedIn ? "not_stored" : i >= 38 ? "deleted" : "kept";
+    checks.push({
+      id,
+      at: iso(4 + i * 5),
+      worker_id: signedIn ? worker.worker_id : `X-${900 + i}`,
+      worker_name: signedIn ? worker.display_name : null,
+      site: signedIn ? worker.site : null,
+      signed_in: signedIn,
+      job: job.key,
+      job_name: job.display_name,
+      job_version: job.version,
+      required,
+      pending,
+      verdict,
+      verdict_source: verdict === "NEEDS_REVIEW" ? "detector+gemini" : "detector",
+      missing_equipment: verdict === "FAIL" ? ["hardhat"] : missing,
+      violations_detected: violations,
+      unverifiable_equipment: pending,
+      explanation:
+        verdict === "FAIL"
+          ? `The worker isn't wearing a hardhat, which ${job.display_name.toLowerCase()} work requires against falling objects.`
+          : null,
+      model_used: "yolo11l",
+      confidence_threshold: 0.45,
+      gemini_verify: true,
+      gemini_min_confidence: i < 20 ? 0.8 : 0.75,
+      photo:
+        photoState === "not_stored"
+          ? { state: "not_stored", width: null, height: null, bytes: null, type: null }
+          : { state: photoState, width: PHOTO.width, height: PHOTO.height, bytes: 380_000 + i * 1_013, type: "image/jpeg" },
+      training_consent: signedIn && i % 4 === 0,
+      review: reviewed
+        ? { outcome: i % 2 === 0 ? "compliant" : "not_compliant", note: "Checked with the worker on site.", by: supervisor, at: iso(2 + i * 5) }
+        : null,
+      detections,
+      verification:
+        verdict === "NEEDS_REVIEW"
+          ? {
+              model: "gemini-2.5-flash",
+              items: missing.map((item) => ({
+                item,
+                status: "uncertain" as const,
+                confidence: 0.55,
+                reason: "The area where it would be is out of frame.",
+              })),
+              elapsed_ms: 2140,
+            }
+          : null,
+    });
+  }
+  return checks;
 }
 
 const req = (item: string, mode: Requirement["mode"] = "required"): Requirement => ({ item, mode });
@@ -132,6 +240,8 @@ export function seedState(now: Date = new Date()): MockState {
       id: 303, at: iso(1), actor: "supervisor.b@example.com", action: "worker.reset_pin", target: "worker:W-0004",
       site: "pune_tower_b", before: null, after: null, ip: "192.168.29.31",
     },
+    // `photos.purge` and `photos.export` (checks-api §8) are written by the server's own jobs, which
+    // the stand-in doesn't run; the Audit log lists them as actions to filter by.
   ];
 
   return {
@@ -144,6 +254,8 @@ export function seedState(now: Date = new Date()): MockState {
     users,
     workers,
     audit,
+    checks: seedChecks(now, jobs, workers, items),
+    photoFileFailsAfter: null,
     nextUserId: 200,
     nextAuditId: 304,
   };

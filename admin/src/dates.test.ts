@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { isUsableDay, startOfDay, startOfNextDay } from "./dates";
+import { isUsableDay, startOfDay, startOfNextDay, workingDaysBack } from "./dates";
 
 const ORIGINAL_TZ = process.env.TZ;
 afterEach(() => {
@@ -86,5 +86,19 @@ describe("what a date box can hand over that isn't a day anyone means", () => {
   it("an ordinary day is usable, and an empty box is not a day at all", () => {
     expect(isUsableDay("2026-11-02")).toBe(true);
     expect(isUsableDay("")).toBe(false);
+  });
+});
+
+describe("workingDaysBack: the window for 'no check without a login for 3 working days' (auth-api §5)", () => {
+  const day = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()} ${d.getHours()}:${d.getMinutes()}`;
+
+  // The dates are made inside each test, after the timezone is set: other tests in this file change it.
+  it.each([
+    ["Wednesday 25 November", [2026, 10, 25, 15], "2026-11-20 0:0"], // back past the weekend to Friday
+    ["Monday 23 November", [2026, 10, 23, 9], "2026-11-18 0:0"], // to the Wednesday before
+    ["Sunday 25 October", [2026, 9, 25, 12], "2026-10-21 0:0"], // the weekend doesn't count
+  ])("on %s it starts at local midnight %s", (_name, [year, month, date, hour], expected) => {
+    inZone("Asia/Kolkata", -330);
+    expect(day(workingDaysBack(3, new Date(year, month, date, hour)))).toBe(expected);
   });
 });

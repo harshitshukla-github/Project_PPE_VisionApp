@@ -400,3 +400,255 @@ describe("audit log (§9)", () => {
     expect(page.items).toHaveLength(2);
   });
 });
+
+describe("checks (docs/checks-api.md)", () => {
+  const check = (id: number) => backend.state.checks.find((c) => c.id === id)!;
+  /** A NEEDS_REVIEW check nobody has reviewed yet. */
+  const unreviewed = () => backend.state.checks.find((c) => c.verdict === "NEEDS_REVIEW" && !c.review)!;
+
+  describe("the list (§4.1)", () => {
+    it("is newest first, paged, with a total, and leaves out detections and verification", async () => {
+      const page = (await call("GET", "/checks?limit=10")).body;
+      expect(page.total).toBe(backend.state.checks.length);
+      expect(page.items).toHaveLength(10);
+      expect(page.next_cursor).toEqual(expect.any(String));
+      const times = page.items.map((c: { at: string }) => c.at);
+      expect([...times].sort().reverse()).toEqual(times);
+      expect(page.items[0]).not.toHaveProperty("detections");
+      expect(page.items[0]).not.toHaveProperty("verification");
+      expect(page.items[0]).toHaveProperty("photo");
+    });
+
+    it("gives a supervisor only their own site's checks, whatever `site` asks for, and never one without a site", async () => {
+      signedIn = SUPERVISOR_B;
+      const all = (await call("GET", "/checks?limit=200")).body;
+      expect(all.items.length).toBeGreaterThan(0);
+      expect(all.items.every((c: { site: string }) => c.site === "pune_tower_b")).toBe(true);
+      expect((await call("GET", "/checks?site=pune_tower_c&limit=200")).body.total).toBe(all.total);
+    });
+
+    it("filters by verdict, review, login, job, worker (any case), site and dates", async () => {
+      const waiting = (await call("GET", "/checks?verdict=NEEDS_REVIEW&reviewed=false&limit=200")).body;
+      expect(waiting.items.every((c: { verdict: string; review: unknown }) => c.verdict === "NEEDS_REVIEW" && c.review === null)).toBe(true);
+      expect(waiting.total).toBe(backend.state.checks.filter((c) => c.verdict === "NEEDS_REVIEW" && !c.review).length);
+
+      const noLogin = (await call("GET", "/checks?signed_in=false&limit=200")).body;
+      expect(noLogin.total).toBe(3);
+      expect(noLogin.items.every((c: { signed_in: boolean; site: null }) => !c.signed_in && c.site === null)).toBe(true);
+
+      const someone = backend.state.checks.find((c) => c.signed_in)!;
+      const theirs = (await call("GET", `/checks?worker=${someone.worker_id.toLowerCase()}&limit=200`)).body;
+      expect(theirs.total).toBeGreaterThan(0);
+      expect(theirs.items.every((c: { worker_id: string }) => c.worker_id === someone.worker_id)).toBe(true);
+
+      expect((await call("GET", "/checks?job=painter&limit=200")).body.items.every((c: { job: string }) => c.job === "painter")).toBe(true);
+      expect((await call("GET", "/checks?site=pune_tower_c&limit=200")).body.items.every((c: { site: string }) => c.site === "pune_tower_c")).toBe(true);
+
+      const newest = backend.state.checks.map((c) => c.at).sort().at(-1)!;
+      expect((await call("GET", `/checks?from=${newest}`)).body.total).toBe(1);
+      expect((await call("GET", `/checks?to=${newest}&limit=200`)).body.total).toBe(backend.state.checks.length - 1);
+    });
+
+    it("refuses an unknown verdict", async () => {
+      expect((await call("GET", "/checks?verdict=MAYBE")).body).toMatchObject({ code: "invalid", field: "verdict" });
+    });
+  });
+
+  describe("one check and its photo (§4.2)", () => {
+    it("gives the whole check, with detections", async () => {
+      const res = await call("GET", "/checks/1001");
+      expect(res.status).toBe(200);
+      expect(res.body.detections.length).toBeGreaterThan(0);
+      expect(res.body).toMatchObject({ id: 1001, gemini_min_confidence: expect.any(Number), required: expect.any(Array) });
+    });
+
+    it("answers 404 not_found to a supervisor for another site's check, or one without a site", async () => {
+      signedIn = SUPERVISOR_B;
+      const elsewhere = backend.state.checks.find((c) => c.site === "pune_tower_c")!;
+      const noSite = backend.state.checks.find((c) => c.site === null)!;
+      expect((await call("GET", `/checks/${elsewhere.id}`)).body.code).toBe("not_found");
+      expect((await call("GET", `/checks/${noSite.id}`)).body.code).toBe("not_found");
+      expect((await call("GET", `/checks/${elsewhere.id}/photo`)).status).toBe(404);
+    });
+
+    it("serves a kept photo as an image that isn't cached; 404 for one never stored, 410 for one deleted", async () => {
+      const kept = backend.state.checks.find((c) => c.photo.state === "kept")!;
+      const response = await backend.fetch(`/api/v1/admin/checks/${kept.id}/photo`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toMatch(/^image\//);
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+
+      const never = backend.state.checks.find((c) => c.photo.state === "not_stored")!;
+      expect(await call("GET", `/checks/${never.id}/photo`)).toMatchObject({ status: 404, body: { code: "not_found" } });
+      const deleted = backend.state.checks.find((c) => c.photo.state === "deleted")!;
+      expect(await call("GET", `/checks/${deleted.id}/photo`)).toMatchObject({ status: 410, body: { code: "photo_deleted" } });
+    });
+  });
+
+  describe("reviewing (§4.3)", () => {
+    it("records a review beside the verdict, which doesn't change, and audits it", async () => {
+      const c = unreviewed();
+      const res = await call("POST", `/checks/${c.id}/review`, { outcome: "compliant", note: "  Gloves in hand.  " });
+
+      expect(res.status).toBe(200);
+      expect(res.body.check.review).toMatchObject({ outcome: "compliant", note: "Gloves in hand.", by: ADMIN.email });
+      expect(res.body.check.verdict).toBe("NEEDS_REVIEW");
+      expect(backend.state.audit.at(-1)).toMatchObject({
+        action: "check.review",
+        target: `check:${c.id}`,
+        before: null,
+        after: { outcome: "compliant", note: "Gloves in hand." },
+      });
+    });
+
+    it("accepts any verdict: a wrong FAIL can be overturned, a wrong PASS flagged", async () => {
+      const fail = backend.state.checks.find((c) => c.verdict === "FAIL" && c.site === "pune_tower_b")!;
+      const pass = backend.state.checks.find((c) => c.verdict === "PASS" && c.site === "pune_tower_b")!;
+      signedIn = SUPERVISOR_B;
+      expect((await call("POST", `/checks/${fail.id}/review`, { outcome: "compliant" })).status).toBe(200);
+      expect((await call("POST", `/checks/${pass.id}/review`, { outcome: "not_compliant" })).status).toBe(200);
+    });
+
+    it("answers a second review 409 already_reviewed with the check as it is now, so nobody overwrites anybody", async () => {
+      const c = unreviewed();
+      await call("POST", `/checks/${c.id}/review`, { outcome: "compliant" });
+      const res = await call("POST", `/checks/${c.id}/review`, { outcome: "not_compliant" });
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ code: "already_reviewed", current: { id: c.id, review: { outcome: "compliant" } } });
+      expect(check(c.id).review!.outcome).toBe("compliant");
+    });
+
+    it("lets an admin replace a review, audited with the replaced one in `before`", async () => {
+      const reviewed = backend.state.checks.find((c) => c.review)!;
+      const was = reviewed.review!;
+      const res = await call("POST", `/checks/${reviewed.id}/review`, { outcome: "not_compliant", replace: true });
+      expect(res.status).toBe(200);
+      expect(check(reviewed.id).review).toMatchObject({ outcome: "not_compliant", by: ADMIN.email });
+      expect(backend.state.audit.at(-1)).toMatchObject({
+        before: { outcome: was.outcome, note: was.note },
+        after: { outcome: "not_compliant" },
+      });
+    });
+
+    it("refuses `replace` from a supervisor: 422 invalid", async () => {
+      const reviewed = backend.state.checks.find((c) => c.review && c.site === "pune_tower_b")!;
+      signedIn = SUPERVISOR_B;
+      expect((await call("POST", `/checks/${reviewed.id}/review`, { outcome: "compliant", replace: true })).body).toMatchObject({
+        code: "invalid",
+        field: "replace",
+      });
+    });
+
+    it("refuses an unknown outcome and a note over 500 characters", async () => {
+      const c = unreviewed();
+      expect((await call("POST", `/checks/${c.id}/review`, { outcome: "maybe" })).body).toMatchObject({ code: "invalid", field: "outcome" });
+      expect((await call("POST", `/checks/${c.id}/review`, { outcome: "compliant", note: "x".repeat(501) })).body).toMatchObject({
+        code: "invalid",
+        field: "note",
+      });
+      expect(check(c.id).review).toBeNull();
+    });
+  });
+
+  describe("deleting a worker's photos (§4.4)", () => {
+    const withPhotos = () => backend.state.checks.find((c) => c.photo.state === "kept" && c.signed_in)!.worker_id;
+
+    it("is for admins only", async () => {
+      signedIn = SUPERVISOR_B;
+      expect((await call("DELETE", `/workers/${withPhotos()}/photos`)).status).toBe(403);
+    });
+
+    it("deletes every kept photo, keeps the checks, and audits the count", async () => {
+      const worker = withPhotos();
+      const kept = backend.state.checks.filter((c) => c.worker_id === worker && c.photo.state === "kept").length;
+      const checks = backend.state.checks.filter((c) => c.worker_id === worker).length;
+
+      const res = await call("DELETE", `/workers/${worker}/photos`);
+
+      expect(res.body).toEqual({ deleted: kept });
+      expect(backend.state.checks.filter((c) => c.worker_id === worker)).toHaveLength(checks);
+      expect(backend.state.checks.some((c) => c.worker_id === worker && c.photo.state === "kept")).toBe(false);
+      expect(backend.state.audit.at(-1)).toMatchObject({
+        action: "worker.photos_delete",
+        target: `worker:${worker}`,
+        after: { deleted: kept },
+      });
+    });
+
+    it("answers 404 for a worker who doesn't exist", async () => {
+      expect((await call("DELETE", "/workers/NOBODY/photos")).status).toBe(404);
+    });
+
+    it("stops at a file it can't delete with a plain 500; the ones before stay deleted and audited, and again deletes the rest", async () => {
+      // The sample data gives each worker one check; give this worker a second stored photo.
+      const [first, second] = backend.state.checks.filter((c) => c.photo.state === "kept" && c.signed_in);
+      second.worker_id = first.worker_id;
+      const worker = first.worker_id;
+      const kept = () => backend.state.checks.filter((c) => c.worker_id === worker && c.photo.state === "kept").length;
+      const before = kept();
+      expect(before).toBe(2);
+      backend.state.photoFileFailsAfter = 1;
+
+      const response = await backend.fetch(`/api/v1/admin/workers/${worker}/photos`, { method: "DELETE" });
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("Content-Type")).toBe("text/plain"); // not JSON
+      expect(kept()).toBe(before - 1);
+      expect(backend.state.audit.at(-1)).toMatchObject({ action: "worker.photos_delete", after: { deleted: 1 } });
+
+      expect((await call("DELETE", `/workers/${worker}/photos`)).body).toEqual({ deleted: before - 1 });
+      expect(kept()).toBe(0);
+    });
+  });
+
+  describe("photo settings (§7)", () => {
+    it("lists store_photos and the two retention periods, with their defaults", async () => {
+      const settings = (await call("GET", "/settings")).body as Array<{ name: string }>;
+      expect(settings.find((s) => s.name === "store_photos")).toMatchObject({ default: true });
+      expect(settings.find((s) => s.name === "photo_review_days")).toMatchObject({ default: 90, min: 7, max: 3650 });
+      expect(settings.find((s) => s.name === "photo_training_days")).toMatchObject({ default: 730, min: 30, max: 3650 });
+    });
+
+    it.each([
+      [{ photo_training_days: 60 }, "photo_training_days"], // shorter than the default 90 for review
+      [{ photo_review_days: 800 }, "photo_review_days"], // longer than the default 730 for training
+      [{ photo_review_days: 100, photo_training_days: 90 }, "photo_training_days"],
+    ])("refuses %j: training is never shorter than review (422 out_of_range on %s), and saves nothing", async (patch, field) => {
+      const res = await call("PATCH", "/settings", patch);
+      expect(res.status).toBe(422);
+      expect(res.body).toMatchObject({ code: "out_of_range", field });
+      expect(backend.state.settings).not.toHaveProperty("photo_review_days");
+      expect(backend.state.settings).not.toHaveProperty("photo_training_days");
+    });
+
+    it("refuses a period that isn't a whole number of days", async () => {
+      expect((await call("PATCH", "/settings", { photo_review_days: 30.5 })).body).toMatchObject({
+        code: "invalid",
+        field: "photo_review_days",
+      });
+    });
+
+    it("warns retention_changed, with how many photos the next daily run deletes", async () => {
+      const res = await call("PATCH", "/settings", { photo_review_days: 7 });
+      expect(res.status).toBe(200);
+      const warning = res.body.warnings.find((w: { code: string }) => w.code === "retention_changed");
+      expect(warning).toMatchObject({
+        setting: "photo_review_days",
+        count: expect.any(Number),
+        message: expect.stringMatching(/will delete \d+ photos?/),
+      });
+      expect(warning.message).toContain(String(warning.count));
+    });
+
+    it("warns once per period changed", async () => {
+      const res = await call("PATCH", "/settings", { photo_review_days: 30, photo_training_days: 400 });
+      const settings = res.body.warnings.filter((w: { code: string }) => w.code === "retention_changed").map((w: { setting: string }) => w.setting);
+      expect(settings.sort()).toEqual(["photo_review_days", "photo_training_days"]);
+    });
+
+    it("stores a note that is only spaces as null (§4.3)", async () => {
+      const c = backend.state.checks.find((x) => x.verdict === "NEEDS_REVIEW" && !x.review)!;
+      expect((await call("POST", `/checks/${c.id}/review`, { outcome: "compliant", note: "   " })).body.check.review.note).toBeNull();
+    });
+  });
+});

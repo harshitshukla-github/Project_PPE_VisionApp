@@ -10,6 +10,13 @@ export function currentPath(): string {
   return hash.split("?")[0] || "/";
 }
 
+/** The `?…` part of the hash, such as `worker=W-0001` in `#/checks?worker=W-0001`. */
+export function currentQuery(): URLSearchParams {
+  const hash = window.location.hash;
+  const at = hash.indexOf("?");
+  return new URLSearchParams(at === -1 ? "" : hash.slice(at + 1));
+}
+
 export function navigate(path: string): void {
   window.location.hash = path;
 }
