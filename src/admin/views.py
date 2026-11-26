@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from src.db.models import AuditEntry, Job, Site, User, Worker
+from src.db.models import AuditEntry, Check, Job, Site, User, Worker
 
 
 def iso(moment: datetime | None) -> str | None:
@@ -73,6 +73,67 @@ def worker_view(worker: Worker) -> dict[str, Any]:
         # null for a worker made from the CLI (docs/admin-api.md §8)
         "created_by": worker.creator.email if worker.creator else None,
     }
+
+
+def review_view(check: Check) -> dict[str, Any] | None:
+    if check.review_outcome is None:
+        return None
+    return {
+        "outcome": check.review_outcome,
+        "note": check.review_note,
+        "by": check.reviewer.email if check.reviewer else None,
+        "at": iso(check.reviewed_at),
+    }
+
+
+def check_view(check: Check, *, full: bool = True) -> dict[str, Any]:
+    """A check as docs/checks-api.md §2 writes it.
+
+    Args:
+        check: With its worker, site and reviewer loaded.
+        full: ``False`` for the list, which leaves out ``detections`` and
+            ``verification`` to stay small (§4.1).
+    """
+    view: dict[str, Any] = {
+        "id": check.id,
+        "at": iso(check.at),
+        "worker_id": check.worker_code,
+        # null when the ID a check without login gave names no worker (§2)
+        "worker_name": check.worker.display_name if check.worker else None,
+        # the worker's site when the check was made (§1)
+        "site": check.site.key if check.site else None,
+        "signed_in": check.signed_in,
+        "job": check.job_key,
+        "job_name": check.job_name,
+        "job_version": check.job_version,
+        "required": check.required,
+        "pending": check.pending,
+        "verdict": check.verdict,
+        "verdict_source": check.verdict_source,
+        "missing_equipment": check.missing_equipment,
+        "violations_detected": check.violations_detected,
+        "unverifiable_equipment": check.unverifiable_equipment,
+    }
+    if full:
+        view["detections"] = check.detections
+        view["verification"] = check.verification
+    view.update({
+        "explanation": check.explanation,
+        "model_used": check.model_used,
+        "confidence_threshold": check.confidence_threshold,
+        "gemini_verify": check.gemini_verify,
+        "gemini_min_confidence": check.gemini_min_confidence,
+        "photo": {
+            "state": check.photo_state,
+            "width": check.photo_width,
+            "height": check.photo_height,
+            "bytes": check.photo_bytes,
+            "type": check.photo_type,
+        },
+        "training_consent": check.training_consent,
+        "review": review_view(check),
+    })
+    return view
 
 
 def audit_view(entry: AuditEntry) -> dict[str, Any]:

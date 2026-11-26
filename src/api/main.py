@@ -11,6 +11,8 @@ or via the CLI (recommended — supports model/device selection)::
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -27,6 +29,7 @@ from src.api.errors import ApiError, api_error_handler
 from src.api.middleware import add_middleware
 from src.api.routes import router
 from src.auth.errors import database_unavailable_handler
+from src.checks import retention
 from src.inference.compliance import MatrixUnavailableError, load_job_matrix, matrix_source
 from src.settings import settings
 
@@ -69,8 +72,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "data on disk; turn it off when you are done diagnosing."
         )
 
+    # docs/checks-api.md §6: photos past their period are deleted once a day.
+    purging = asyncio.create_task(retention.run_daily()) if settings.database_url else None
+    if purging:
+        logger.info("Photo retention: photos past their period are deleted once a day.")
+
     logger.success(f"PPB API ready — serving {detector.model_name} on {detector.device}")
     yield
+    if purging:
+        purging.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await purging
     logger.info("PPB API shutting down.")
 
 

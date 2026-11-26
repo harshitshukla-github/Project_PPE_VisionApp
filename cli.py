@@ -79,6 +79,14 @@ sites_app = typer.Typer(
 )
 app.add_typer(sites_app, name="sites")
 
+photos_app = typer.Typer(
+    help="Worker photos kept with checks: delete one worker's, purge expired ones, export for "
+         "training.",
+    rich_markup_mode="markdown",
+    no_args_is_help=True,
+)
+app.add_typer(photos_app, name="photos")
+
 console = Console()
 
 # ---------------------------------------------------------------------------
@@ -1192,6 +1200,111 @@ def sites_create_cmd(
 
     _run_account_command(action)
     console.print(f"[green]Created site {key} ({display_name}).[/green]")
+
+
+# ---------------------------------------------------------------------------
+# photos commands (docs/checks-api.md §4.4)
+# ---------------------------------------------------------------------------
+
+@photos_app.command("delete")
+def photos_delete_cmd(
+    worker: str = typer.Option(..., "--worker", help="The worker's ID, e.g. W-0042."),
+    yes: bool = typer.Option(False, "--yes", help="Don't ask before deleting."),
+) -> None:
+    """
+    Delete every stored photo of one worker, **for good**. Their checks stay.
+
+    For a request that doesn't come through the dashboard. Recorded in the
+    audit log with actor `cli`.
+    """
+    from sqlalchemy import select
+
+    from src.admin import audit
+    from src.admin.checks import delete_worker_photos, kept_photo_count
+    from src.auth.crypto import normalize_worker_code
+    from src.db.models import Worker
+
+    code = normalize_worker_code(worker)
+
+    def photos(n: int) -> str:
+        return f"{n} photo{'' if n == 1 else 's'}"
+
+    def action(db) -> str:
+        target = db.scalar(select(Worker).where(Worker.worker_code == code))
+        if target is None:
+            raise ValueError(f"No worker {code}.")
+        who = f"{code} ({target.display_name})"
+        count = kept_photo_count(db, target)
+        if count == 0:
+            return f"{who} has no stored photos."
+        if not yes and not typer.confirm(f"Delete {photos(count)} of {who}? "
+                                         "This can't be undone."):
+            console.print("Nothing deleted.")
+            raise typer.Exit(code=1)
+        try:
+            deleted = delete_worker_photos(db, target, audit.CLI_ACTOR, None)
+        except OSError as exc:
+            console.print(f"[red]A photo couldn't be deleted: {exc}[/red]\n"
+                          "The ones before it are deleted and recorded. Run the command "
+                          "again to delete the rest.")
+            raise typer.Exit(code=1) from None
+        return f"[green]Deleted {photos(deleted)} of {who}. Their checks are kept.[/green]"
+
+    console.print(_run_account_command(action))
+
+
+@photos_app.command("purge")
+def photos_purge_cmd(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Only say how many are due."),
+) -> None:
+    """
+    Delete every photo past its retention period, now. Their checks stay.
+
+    The API server already does this once a day (docs/checks-api.md §6); this
+    is for running it by hand. Recorded in the audit log with actor `cli`.
+    """
+    from src.checks.retention import count_expired, periods, purge
+
+    def action(db) -> str:
+        review, training = periods()
+        rule = f"older than {review} days, or {training} with training consent"
+        if dry_run:
+            return f"{count_expired(db, review, training)} photos are due for deletion ({rule})."
+        try:
+            deleted = purge(db)
+        except OSError as exc:
+            console.print(f"[red]A photo couldn't be deleted: {exc}[/red]\n"
+                          "The ones before it are deleted and recorded. Run it again to "
+                          "delete the rest.")
+            raise typer.Exit(code=1) from None
+        return f"[green]Deleted {deleted} photo{'' if deleted == 1 else 's'} ({rule}).[/green]"
+
+    console.print(_run_account_command(action))
+
+
+@photos_app.command("export")
+def photos_export_cmd(
+    to: Path = typer.Option(..., "--to", help="A new or empty folder to export into."),
+    consented: bool = typer.Option(
+        False, "--consented", help="Required: only photos whose worker agreed to training."
+    ),
+) -> None:
+    """
+    Copy the photos workers agreed to have used for **training**, with a manifest.
+
+    Writes `images/` and `manifest.jsonl` (labels, no worker IDs or names).
+    Never a photo past its retention period, or one whose worker withdrew.
+    Recorded in the audit log with actor `cli`.
+    """
+    from src.checks.export import export_consented
+
+    if not consented:
+        console.print("[red]Only photos with training consent can be exported: add "
+                      "--consented.[/red]")
+        raise typer.Exit(code=1)
+    exported = _run_account_command(lambda db: export_consented(db, to))
+    console.print(f"[green]Exported {exported} photo{'' if exported == 1 else 's'} to "
+                  f"{to.resolve()}.[/green]")
 
 
 # ---------------------------------------------------------------------------

@@ -214,6 +214,10 @@ policy already allows it. Opening a photo isn't recorded in the audit log
 "review": { "outcome": "compliant", "note": "…", "by": "supervisor.b@example.com", "at": "2026-12-03T08:02:51Z" }
 ```
 
+- The answer is `200` with `{ "check": … }`: the whole check as it is now
+  (§2), like `{ "worker": … }` and `{ "site": … }` in `admin-api.md`. A note
+  is trimmed, and one that is only spaces is stored as `null`.
+
 ### 4.4 `DELETE /workers/{worker_id}/photos`
 
 Deletes every stored photo of that worker. It doesn't delete the checks:
@@ -225,6 +229,10 @@ their verdicts and reviews stay, with `photo.state: "deleted"`.
 
 - It deletes the files, not only the records pointing at them, and it can't
   be undone. The dashboard says so and asks for confirmation first.
+- A check is marked `deleted` only once its file is gone. If a file can't be
+  deleted (a disk error, say), the request stops there and fails with a
+  server error. The photos deleted before it stay deleted and are counted in
+  that request's audit entry. Asking again deletes the rest.
 - Admins only (§10, 5). A worker asks their supervisor, who passes the
   request to an admin.
 - Withdrawing training consent (§5) doesn't delete photos at once: it puts
@@ -232,7 +240,8 @@ their verdicts and reviews stay, with `photo.state: "deleted"`.
   ones older than that.
 - The same is available on the server as
   `cli.py photos delete --worker W-0042`, for a request that arrives by
-  other means.
+  other means. It says how many photos it will delete and asks first
+  (`--yes` skips the question), and its audit entry has `actor: "cli"`.
 
 ## 5. Consent (mobile app)
 
@@ -278,6 +287,13 @@ advice.
   `PUT { "version": 2, "training": true|false }` when the worker closes it.
   A `PUT` for an older version gets `409 notice_changed` with the current
   `notice`, so the worker always answers the wording they were shown.
+- `PUT` answers `200` with the same body as `GET`. Both need a worker token
+  whose worker has chosen their own PIN (`403 pin_change_required`
+  otherwise, as for checks). A body without `version` or `training`, or with
+  the wrong types (`"training": "yes"`), gets FastAPI's own `422`.
+- Every version's words are kept, so the `version` in a `worker.consent`
+  audit entry still says what that worker read. Answering the same version
+  with the same choice again changes nothing and writes no entry.
 - First wording, pending the privacy check (the periods come from §6):
 
   > Photos from your PPE checks are kept on the company's server for up to
@@ -320,6 +336,19 @@ A daily job on the server deletes photos past their period (`photo.state:
 "deleted"`), and so does `cli.py photos purge`. Check records are kept, so
 verdict history doesn't disappear with the photos.
 
+- A photo is past its period when its check is older than
+  `photo_review_days`, or `photo_training_days` if the check carries training
+  consent (§5).
+- The API server runs the job itself. Every hour it looks whether a day has
+  passed since the last `photos.purge` entry, whoever wrote it, so restarts
+  don't reset the clock. A Postgres lock keeps two servers from running it
+  at once, and a run that fails is tried again at the next look rather than
+  a day later.
+- `cli.py photos purge` runs it now; `--dry-run` only says how many are due.
+- A photo is deleted file first, as in §4.4: if a file can't be deleted, the
+  run stops, the ones before it stay deleted and counted, and the next run
+  deletes the rest.
+
 Disk space, to size the periods: at about 300 KB a photo, 500 workers making
 two checks a day fill roughly 110 GB a year. A full disk is a storing
 failure like any other: the worker still gets their verdict (§2).
@@ -337,7 +366,13 @@ failure like any other: the worker still gets their verdict (§2).
   `422 out_of_range` with `field` naming the setting it sent, and nothing
   is saved, as for any patch (`admin-api.md` §6).
 - Changing a retention period gets a warning, `retention_changed`, saying
-  how many photos the next daily run will delete.
+  how many photos the next daily run will delete. One per period changed,
+  with the number also in `count`:
+  `{ "code": "retention_changed", "setting": "photo_review_days", "count": 3, "message": "…" }`.
+- Both periods are whole days; `90.5` gets `422 invalid`.
+- Their `.env` defaults are `PPB_PHOTO_REVIEW_DAYS` and
+  `PPB_PHOTO_TRAINING_DAYS`. The server refuses to start if the training one
+  is the shorter.
 
 ## 8. Audit log
 
@@ -348,9 +383,15 @@ New actions, written in the same transaction as the change:
 | `check.review` | `check:<id>` | `outcome`, `note`. `before` is `null` for a first review; an admin's replacement has the review it replaced in `before` |
 | `worker.photos_delete` | `worker:<id>` | after: `deleted` (a count) |
 | `worker.consent` | `worker:<id>` | `version`, `training` (written by the worker's own `PUT`; `actor` is `worker:<id>`) |
+| `photos.purge` | `photos` | after: `deleted` (a count) |
+| `photos.export` | `photos` | after: `exported` (a count), `folder` |
 
 - The daily retention purge writes one entry per run (`actor: "cli"`,
-  `action: "photos.purge"`, after: `deleted`), not one per photo.
+  `action: "photos.purge"`, after: `deleted`), not one per photo, even when
+  nothing was due: the entries are also the job's clock (§6).
+- `cli.py photos export --consented --to <folder>` writes one
+  `photos.export` entry (`actor: "cli"`), also when it stops part way, so
+  every photo that left the store is on record.
 - Opening a photo isn't recorded (§10, 4). If the privacy check asks for it,
   it comes back as a change to this contract.
 
@@ -378,6 +419,11 @@ New actions, written in the same transaction as the change:
 - Withdrawing training consent clears `training_consent` on the worker's
   earlier checks in the same transaction (§5).
 - The retention job and `cli.py photos delete | purge | export --consented`.
+  The export writes `images/<check id>.<ext>` and `manifest.jsonl`, one
+  line per photo with the job, its requirements, the verdict, the review's
+  outcome and the detector's boxes. It has no worker ID, name or review
+  note, and no photo past its period. Migration `0005` keeps each version
+  of the notice (§5).
 - Tests: a supervisor never sees another site's checks or photos, a deleted
   photo is gone from disk, a failed store still returns the verdict, a check
   without a login never keeps its photo, consent is stamped per check, and a

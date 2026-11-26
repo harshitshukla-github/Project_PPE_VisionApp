@@ -15,6 +15,7 @@ from loguru import logger
 from src.api.deps import get_detector
 from src.api.errors import ApiError
 from src.auth.deps import SignedInWorker, worker_for_check, worker_or_user_when_required
+from src.checks.record import record_check
 from src.inference.compliance import (
     JobRequirements,
     MatrixUnavailableError,
@@ -97,12 +98,16 @@ def _dump_upload(data: bytes, filename: str | None) -> Path | None:
     return out_path
 
 
-async def _decode_upload(image: UploadFile) -> np.ndarray:
-    """Decode an uploaded file into a BGR numpy array.
+async def _decode_upload(image: UploadFile) -> tuple[np.ndarray, bytes]:
+    """Decode an uploaded file into a BGR numpy array, turned upright by its EXIF orientation.
 
     When ``PPB_DEBUG_DUMP_UPLOADS=true`` the raw bytes are written to
     ``PPB_DEBUG_DUMP_DIR`` first, and the decoded dimensions are logged — the
     fastest way to tell whether a client is downscaling before upload.
+
+    Returns:
+        The decoded image, and the bytes as uploaded (kept with the check, §2
+        of docs/checks-api.md).
 
     Raises:
         HTTPException: 400 if the payload is not a decodable image.
@@ -132,7 +137,7 @@ async def _decode_upload(image: UploadFile) -> np.ndarray:
             f"decoded {width}x{height} px  →  "
             f"uv run python cli.py probe {dumped} --job <job>"
         )
-    return array
+    return array, data
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -165,7 +170,7 @@ async def detect(
     _signed_in: None = Depends(worker_or_user_when_required),
 ) -> DetectionResponse:
     """Raw PPE detection — bounding boxes only, no compliance logic."""
-    array = await _decode_upload(image)
+    array, _ = await _decode_upload(image)
     detections, elapsed_ms = detector.detect(array)
     height, width = array.shape[:2]
     return DetectionResponse(
@@ -225,7 +230,7 @@ async def compliance_check(
             field="job_category",
         )
 
-    array = await _decode_upload(image)
+    array, upload = await _decode_upload(image)
     detections, elapsed_ms = detector.detect(array)
     result = check_compliance(detections, job_category)
 
@@ -255,7 +260,7 @@ async def compliance_check(
         f"{job_category}: {result.verdict.value} "
         f"(decided by {result.verdict_source})"
     )
-    return ComplianceResponse(
+    response = ComplianceResponse(
         worker_id=worker_id,
         job_category=job_category,
         verdict=result.verdict,
@@ -271,6 +276,13 @@ async def compliance_check(
         inference_time_ms=elapsed_ms,
         gemini_invoked=gemini_invoked,
     )
+    # Stored only now that the verdict is decided, and never at its cost (docs/checks-api.md §2).
+    height, width = array.shape[:2]
+    response.check_id = await run_in_threadpool(
+        record_check, response, signed_in=signed_in, requirements=matrix[job_category],
+        upload=upload, width=width, height=height, confidence_threshold=detector.confidence,
+    )
+    return response
 
 
 @router.get("/jobs")

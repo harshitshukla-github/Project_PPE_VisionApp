@@ -250,6 +250,46 @@ dashboard calls, under `/api/v1/admin`, behind the dashboard login.
 
 After pulling, run `uv run python cli.py db migrate` to reach migration `0003`.
 
+## Checks and photos (Phase 6)
+
+The contract is [`docs/checks-api.md`](docs/checks-api.md). Every check that
+gets a verdict is stored with what it was judged against, and the response
+carries its `check_id`. Storing never fails a check: if it can't be stored,
+the worker still gets their verdict and the server logs why.
+
+- **Photos** are kept only for a signed-in worker who has answered the photo
+  notice in the app, and only while the `store_photos` setting is on. Only
+  their location (the EXIF GPS tags) is removed. They are files under
+  `PPB_PHOTO_DIR` (default `data/photos/`, ignored by git); keep that folder
+  out of anything a web server serves. A photo leaves only through
+  `/admin/checks/{id}/photo`, for admins and the supervisor of the check's
+  site.
+- **Review.** The dashboard lists checks from `/admin/checks`. A supervisor
+  reviews their own site's checks, once; an admin can replace a review. The
+  verdict itself never changes.
+- **Deleting a worker's photos** (admins): `DELETE /admin/workers/{id}/photos`,
+  which the dashboard's Workers page calls, or on the server for a request
+  that arrives another way. The checks stay.
+
+- **The notice.** The app asks the server for the photo notice after sign-in
+  (`/auth/worker/consent`) and shows it in the server's words. Keeping photos
+  longer for training is the worker's choice, off until they say yes;
+  withdrawing it applies to their earlier photos too.
+- **How long photos are kept:** 90 days, or 730 with training consent
+  (`PPB_PHOTO_REVIEW_DAYS`, `PPB_PHOTO_TRAINING_DAYS`, or the dashboard's
+  settings). The API server deletes older photos once a day by itself.
+
+```bash
+uv run python cli.py photos delete --worker W-0042      # says how many and asks; --yes skips that
+uv run python cli.py photos purge --dry-run             # how many are past their period (drop --dry-run to delete them now)
+uv run python cli.py photos export --consented --to ../ppb-training/2026-12   # consented photos only, no names
+```
+
+An export is still workers' photos: put it outside the project (never in
+git) and delete it once the training run no longer needs it.
+
+After pulling, run `uv run python cli.py db migrate` to reach migration `0005`.
+
 ## Admin dashboard
 
 The pages are in [`admin/`](admin/README.md). Build them once and the API server
