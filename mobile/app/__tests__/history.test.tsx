@@ -83,17 +83,17 @@ describe("HistoryScreen", () => {
         ? new Promise<string | null>((resolve) => (finishRead = resolve))
         : realGetItem(key)) as typeof AsyncStorage.getItem;
     try {
-    await renderHistory();
+      await renderHistory();
 
-    // historyLoaded starts false — must not claim "no checks" before we've
-    // actually finished reading AsyncStorage, even though the list is [] either way.
-    expect(
-      screen.queryByText("No checks yet — completed compliance checks will show up here."),
-    ).toBeNull();
-    expect(screen.getByTestId("history-loading")).toBeTruthy();
+      // historyLoaded starts false — must not claim "no checks" before we've
+      // actually finished reading AsyncStorage, even though the list is [] either way.
+      expect(
+        screen.queryByText("No checks yet — completed compliance checks will show up here."),
+      ).toBeNull();
+      expect(screen.getByTestId("history-loading")).toBeTruthy();
 
-    finishRead(null);
-    await screen.findByText("No checks yet — completed compliance checks will show up here.");
+      finishRead(null);
+      await screen.findByText("No checks yet — completed compliance checks will show up here.");
     } finally {
       AsyncStorage.getItem = realGetItem;
     }
