@@ -19,7 +19,7 @@ export default function RootLayout() {
  * Root stack, gated by who is signed in (docs/auth-api.md §8). A screen whose
  * guard is false isn't reachable at all, and when a guard flips — login,
  * logout, an expired session, a forced PIN change — the router moves to the
- * first screen that is allowed. That is what sends a worker to Login the
+ * screen the worker belongs on (`redirectTo`). That is what sends a worker to Login the
  * moment a request answers 401, with no per-screen redirect code.
  *
  * - Login: signed out (or still checking the saved token).
@@ -34,15 +34,20 @@ function RootStack() {
   const signedIn = auth.kind === "signedIn";
   const mustChangePin = signedIn && auth.mustChangePin;
 
+  // Where a worker belongs right now. Every guarded group redirects here when its guard turns
+  // off: since SDK 58 the router's own fallback is the anchor or the first unguarded route in its
+  // own order (Settings, here), not the next screen in this list.
+  const home = !signedIn ? "/login" : mustChangePin ? "/change-pin" : "/";
+
   return (
     <Stack>
-      <Stack.Protected guard={!signedIn}>
+      <Stack.Protected guard={!signedIn} redirectTo={home}>
         <Stack.Screen name="login" options={{ title: "Sign in", headerShown: false }} />
       </Stack.Protected>
-      <Stack.Protected guard={mustChangePin}>
+      <Stack.Protected guard={mustChangePin} redirectTo={home}>
         <Stack.Screen name="change-pin" options={{ title: "Choose a PIN", headerShown: false }} />
       </Stack.Protected>
-      <Stack.Protected guard={signedIn && !mustChangePin}>
+      <Stack.Protected guard={signedIn && !mustChangePin} redirectTo={home}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         {/* Without a back title, iOS labels the button with the (tabs) group's route name. */}
         <Stack.Screen name="result" options={{ title: "Result", headerBackTitle: "Back" }} />

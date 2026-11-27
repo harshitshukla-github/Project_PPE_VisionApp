@@ -41,7 +41,7 @@ export default function LoginScreen() {
   if (auth.kind === "loading") {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <ActivityIndicator testID="session-checking" />
       </View>
     );
   }

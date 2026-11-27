@@ -53,7 +53,7 @@ function RefreshButton() {
   );
 }
 
-function renderHome() {
+async function renderHome() {
   return render(
     <SessionProvider initialAuth={SIGNED_IN}>
       <RefreshButton />
@@ -64,7 +64,7 @@ function renderHome() {
 
 async function refresh() {
   await act(async () => {
-    fireEvent.press(screen.getByTestId("refresh"));
+    await fireEvent.press(screen.getByTestId("refresh"));
   });
 }
 
@@ -79,8 +79,8 @@ beforeEach(async () => {
 
 describe("refreshJobs", () => {
   it("returns the current list and keeps the worker's job when it is still there", async () => {
-    renderHome();
-    fireEvent.press(await screen.findByText("○ Welder"));
+    await renderHome();
+    await fireEvent.press(await screen.findByText("○ Welder"));
     expect(screen.getByTestId("selected")).toHaveTextContent("welder");
 
     await refresh();
@@ -91,7 +91,7 @@ describe("refreshJobs", () => {
   });
 
   it("shows a job an admin added since the app loaded its list", async () => {
-    renderHome();
+    await renderHome();
     await screen.findByText("● General Labor");
     jobsAnswer = () =>
       ok({ ...ALL_JOBS, painter: { required: ["hardhat"], pending: [] } });
@@ -102,8 +102,8 @@ describe("refreshJobs", () => {
   });
 
   it("clears the selection when the job was deactivated, and never swaps in another job", async () => {
-    renderHome();
-    fireEvent.press(await screen.findByText("○ Welder"));
+    await renderHome();
+    await fireEvent.press(await screen.findByText("○ Welder"));
     jobsAnswer = () => ok(WITHOUT_WELDER);
 
     await refresh();
@@ -118,15 +118,15 @@ describe("refreshJobs", () => {
   });
 
   it("shows that note in amber on Home, and removes it once the worker picks a job", async () => {
-    renderHome();
-    fireEvent.press(await screen.findByText("○ Welder"));
+    await renderHome();
+    await fireEvent.press(await screen.findByText("○ Welder"));
     jobsAnswer = () => ok(WITHOUT_WELDER);
     await refresh();
 
     expect(await screen.findByTestId("problem-notice")).toBeTruthy();
     expect(screen.queryByTestId("problem-error")).toBeNull();
 
-    fireEvent.press(screen.getByText("○ General Labor"));
+    await fireEvent.press(screen.getByText("○ General Labor"));
 
     await waitFor(() => expect(screen.queryByTestId("problem-notice")).toBeNull());
     expect(screen.getByTestId("selected")).toHaveTextContent("general_labor");
@@ -136,22 +136,22 @@ describe("refreshJobs", () => {
     ["signing out", "sign-out"],
     ["an ended session", "expire"],
   ])("%s clears the note, so the next worker on a shared phone doesn't see it", async (_label, button) => {
-    renderHome();
-    fireEvent.press(await screen.findByText("○ Welder"));
+    await renderHome();
+    await fireEvent.press(await screen.findByText("○ Welder"));
     jobsAnswer = () => ok(WITHOUT_WELDER);
     await refresh();
     expect(screen.getByTestId("job-notice")).toHaveTextContent(/Welder isn't available any more/);
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId(button));
+      await fireEvent.press(screen.getByTestId(button));
     });
 
     await waitFor(() => expect(screen.getByTestId("job-notice")).toHaveTextContent("no notice"));
   });
 
   it("returns null and changes nothing when the server can't be reached", async () => {
-    renderHome();
-    fireEvent.press(await screen.findByText("○ Welder"));
+    await renderHome();
+    await fireEvent.press(await screen.findByText("○ Welder"));
     jobsAnswer = () => {
       throw new TypeError("Network request failed");
     };
@@ -164,8 +164,8 @@ describe("refreshJobs", () => {
   });
 
   it("returns null and keeps the selection on a 503", async () => {
-    renderHome();
-    fireEvent.press(await screen.findByText("○ Welder"));
+    await renderHome();
+    await fireEvent.press(await screen.findByText("○ Welder"));
     jobsAnswer = () => fail(503, { detail: "Job requirements are temporarily unavailable." });
 
     await refresh();

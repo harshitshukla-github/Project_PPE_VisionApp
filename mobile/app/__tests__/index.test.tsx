@@ -13,7 +13,7 @@ const mockFetch = jest.fn();
 // @ts-expect-error - test-only global fetch stub
 global.fetch = mockFetch;
 
-function renderHome() {
+async function renderHome() {
   return render(
     <SessionProvider initialAuth={SIGNED_IN}>
       <HomeScreen />
@@ -42,7 +42,7 @@ describe("HomeScreen", () => {
       json: async () => JOBS_RESPONSE,
     });
 
-    renderHome();
+    await renderHome();
 
     expect(await screen.findByText("● General Labor")).toBeTruthy();
     expect(screen.getByText("○ Welder")).toBeTruthy();
@@ -58,10 +58,10 @@ describe("HomeScreen", () => {
       json: async () => JOBS_RESPONSE,
     });
 
-    renderHome();
+    await renderHome();
 
     await screen.findByText("● General Labor");
-    fireEvent.press(screen.getByText("○ Welder"));
+    await fireEvent.press(screen.getByText("○ Welder"));
 
     expect(await screen.findByText("● Welder")).toBeTruthy();
     expect(screen.getByText("○ General Labor")).toBeTruthy();
@@ -70,7 +70,7 @@ describe("HomeScreen", () => {
   it("shows an error with a retry option when jobs fail to load", async () => {
     mockFetch.mockRejectedValueOnce(new TypeError("Network request failed"));
 
-    renderHome();
+    await renderHome();
 
     expect(
       await screen.findByText(/Can't load jobs ✗ — Can't reach server/),
@@ -80,7 +80,7 @@ describe("HomeScreen", () => {
       ok: true,
       json: async () => JOBS_RESPONSE,
     });
-    fireEvent.press(screen.getByText("Retry"));
+    await fireEvent.press(screen.getByText("Retry"));
 
     expect(await screen.findByText("● General Labor")).toBeTruthy();
   });
@@ -94,7 +94,7 @@ describe("HomeScreen", () => {
       }),
     });
 
-    renderHome();
+    await renderHome();
 
     const notice = await screen.findByText(/Try again shortly/);
     expect(notice).toHaveStyle({ color: "#8a5a0b" });
@@ -108,7 +108,7 @@ describe("HomeScreen", () => {
       json: async () => JOBS_RESPONSE,
     });
 
-    renderHome();
+    await renderHome();
 
     expect(await screen.findByText("Test Worker")).toBeTruthy();
     expect(screen.getByText("W-0042")).toBeTruthy();

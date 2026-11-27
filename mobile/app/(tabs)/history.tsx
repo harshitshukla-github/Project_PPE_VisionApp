@@ -27,7 +27,7 @@ export default function HistoryScreen() {
   if (!historyLoaded) {
     return (
       <View style={styles.empty}>
-        <ActivityIndicator />
+        <ActivityIndicator testID="history-loading" />
       </View>
     );
   }
