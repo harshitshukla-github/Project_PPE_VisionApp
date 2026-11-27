@@ -3,8 +3,10 @@
 **Status: agreed (draft 2, with the decisions in §10, approved in PR #34).
 The backend, the dashboard and the app are built against it from here.** Any
 change after that goes through a pull request that edits this file first.
-The photo notice's wording (§5) goes past whoever handles privacy for the
-company before it ships in an app release.
+No app release until the photo notice's wording (§5) passes the company's
+privacy check. After approval, Priyanka prepares the release build; track
+the approval, build and rollout in the [release checklist](release-checklist.md).
+Wording-only changes are server changes and need no app update (§5).
 
 This is the contract that `docs/admin-api.md` §10 promised: every check is
 stored with the worker's photo, supervisors review the checks the system
