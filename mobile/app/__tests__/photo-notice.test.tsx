@@ -2,10 +2,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { Text } from "react-native";
 
+import { router } from "expo-router";
+
 import ChangePinScreen from "../change-pin";
 import PhotoNoticeScreen from "../photo-notice";
 import RootLayout from "../_layout";
 import LoginScreen from "../login";
+import SettingsScreen from "../settings";
 import { clearToken, setToken } from "../../src/api/client";
 
 jest.mock("@react-native-async-storage/async-storage", () =>
@@ -64,8 +67,11 @@ function server(options: {
   return answers;
 }
 
-/** The real layout, Login, Change PIN and notice screens; plain stand-ins for the rest. */
-function renderApp() {
+/**
+ * The real layout, Login, Change PIN and notice screens; plain stand-ins for the rest,
+ * Settings included unless the test passes the real one.
+ */
+function renderApp(options: { settings?: () => React.JSX.Element } = {}) {
   return renderRouter(
     {
       _layout: RootLayout,
@@ -79,7 +85,7 @@ function renderApp() {
       "(tabs)/index": () => <Text>HOME-STUB</Text>,
       result: () => <Text>RESULT-STUB</Text>,
       "history-detail": () => <Text>DETAIL-STUB</Text>,
-      settings: () => <Text>SETTINGS-STUB</Text>,
+      settings: options.settings ?? (() => <Text>SETTINGS-STUB</Text>),
     },
     { initialUrl: "/" },
   );
@@ -221,5 +227,101 @@ describe("answering it", () => {
     expect(await screen.findByTestId("photo-notice")).toBeTruthy();
     expect(screen.queryByText("HOME-STUB")).toBeNull();
     expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
+  });
+});
+
+describe("a newer notice while Settings is open", () => {
+  /**
+   * Signed in with version 1 answered, Home open, then Settings. The server then publishes
+   * version 2 (a supervisor changed a period) and the worker turns training on in Settings.
+   */
+  async function openSettingsAndFindNewerNotice() {
+    let current = consent(NOTICE_1, 1);
+    const answers = server({
+      get: () => json(200, current),
+      put: (body) => {
+        current = consent(NOTICE_2, body.version, body.training);
+        return json(200, current);
+      },
+    });
+    const app = renderApp({ settings: SettingsScreen });
+    expect(await screen.findByText("HOME-STUB")).toBeTruthy();
+
+    await act(async () => router.push("/settings"));
+    expect(await screen.findByTestId("photo-settings")).toBeTruthy();
+
+    current = consent(NOTICE_2, 1);
+    await act(async () => {
+      fireEvent(screen.getByTestId("settings-training-switch"), "valueChange", true);
+    });
+
+    // The session now knows a notice is owed. The app's screens stay as they were behind
+    // Settings, and the newer notice shows inline, on "No".
+    expect(await screen.findByText(NOTICE_2.text)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save my answer" })).toBeTruthy();
+    expect(screen.getByTestId("training-switch").props.value).toBe(false);
+    expect(app.getPathname()).toBe("/settings");
+    return { app, answers };
+  }
+
+  it("stays inline on Settings, and Back after saving returns to the app, not the full-screen notice", async () => {
+    const { app, answers } = await openSettingsAndFindNewerNotice();
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
+    });
+    expect(await screen.findByText("Saved. Your photos won't be kept for training.")).toBeTruthy();
+    expect(answers).toEqual([{ version: 2, training: false }]);
+
+    await act(async () => router.back());
+
+    await waitFor(() => expect(app.getPathname()).toBe("/"));
+    expect(screen.getByText("HOME-STUB")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  });
+
+  it("shows the full-screen notice after Back if the newer one was left unanswered", async () => {
+    const { app, answers } = await openSettingsAndFindNewerNotice();
+
+    await act(async () => router.back());
+
+    expect(await screen.findByRole("button", { name: "Continue" })).toBeTruthy();
+    expect(app.getPathname()).toBe("/photo-notice");
+    expect(screen.getByText(NOTICE_2.text)).toBeTruthy();
+    expect(screen.queryByText("HOME-STUB")).toBeNull();
+    expect(answers).toEqual([]);
+  });
+
+  it("on 409 notice_changed while saving, shows the newer notice inline on 'No' and stays on Settings", async () => {
+    let calls = 0;
+    const answers = server({
+      get: () => json(200, consent(NOTICE_1, 1)),
+      put: (body) =>
+        ++calls === 1
+          ? json(409, { detail: "The notice has changed since the app showed it.", code: "notice_changed", notice: NOTICE_2 })
+          : json(200, consent(NOTICE_2, body.version, body.training)),
+    });
+    const app = renderApp({ settings: SettingsScreen });
+    expect(await screen.findByText("HOME-STUB")).toBeTruthy();
+    await act(async () => router.push("/settings"));
+
+    await act(async () => {
+      fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+    });
+
+    expect(await screen.findByText(NOTICE_2.text)).toBeTruthy();
+    expect(screen.getByText("The notice changed. Please read it and answer again.")).toBeTruthy();
+    expect(screen.getByTestId("training-switch").props.value).toBe(false);
+    expect(app.getPathname()).toBe("/settings");
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
+    });
+    expect(answers).toEqual([
+      { version: 1, training: true },
+      { version: 2, training: false },
+    ]);
+    await act(async () => router.back());
+    await waitFor(() => expect(app.getPathname()).toBe("/"));
   });
 });
