@@ -5,14 +5,18 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from "react-native";
 
 import { ApiError, getHealth, getServerUrl, setServerUrl } from "../src/api/client";
-import type { HealthResponse } from "../src/api/types";
-import { useSession } from "../src/context/SessionContext";
+import { problemFrom, type Problem } from "../src/api/problems";
+import type { HealthResponse, PhotoNotice } from "../src/api/types";
+import { PhotoNoticeView } from "../src/components/PhotoNoticeView";
+import { ProblemBanner } from "../src/components/ProblemBanner";
+import { noticeFrom, useSession } from "../src/context/SessionContext";
 
 type ConnectionStatus =
   | { kind: "idle" }
@@ -126,6 +130,8 @@ export default function SettingsScreen() {
         )}
       </View>
 
+      {auth.kind === "signedIn" && !auth.mustChangePin && <PhotoSettings />}
+
       {auth.kind === "signedIn" && (
         <View style={styles.account}>
           <Text style={styles.label}>Account</Text>
@@ -146,9 +152,140 @@ export default function SettingsScreen() {
   );
 }
 
+/**
+ * "Your photos" (docs/checks-api.md §5): the training choice, the notice to
+ * read again, and who to ask about deleting photos.
+ *
+ * Changing the choice asks the server first. If a newer notice has come out
+ * since the worker last answered, it is shown here before anything is saved,
+ * with training at "No" whatever the worker just chose: a newer notice can ask
+ * something different (a longer period, say), so a "Yes" to it must be given
+ * after reading it (§5, "off until they say yes"). The answer goes with that
+ * version. Otherwise the choice is saved at once.
+ */
+function PhotoSettings() {
+  const { consent, refreshConsent, answerNotice } = useSession();
+  // A newer notice to read before anything is saved, and the worker's answer to it so far.
+  const [pending, setPending] = useState<{ notice: PhotoNotice; training: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [showNotice, setShowNotice] = useState(false);
+
+  useEffect(() => {
+    if (!consent) void refreshConsent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function save(version: number, training: boolean) {
+    try {
+      const answer = await answerNotice(version, training);
+      setPending(null);
+      setSaved(
+        answer.training
+          ? "Saved. Your photos may be kept to improve the PPE detector."
+          : "Saved. Your photos won't be kept for training.",
+      );
+    } catch (err) {
+      const newer = noticeFrom(err);
+      if (newer) {
+        setPending({ notice: newer, training: false });
+        setProblem({ message: "The notice changed. Please read it and answer again.", tone: "notice" });
+      } else {
+        setProblem(problemFrom(err, "Couldn't save that. Try again."));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function change(training: boolean) {
+    setBusy(true);
+    setProblem(null);
+    setSaved(null);
+    const fresh = await refreshConsent();
+    if (!fresh) {
+      setProblem({ message: "Couldn't reach the server to change this. Try again.", tone: "error" });
+      setBusy(false);
+      return;
+    }
+    if (fresh.seen_version === null || fresh.seen_version < fresh.notice.version) {
+      setPending({ notice: fresh.notice, training: false });
+      setBusy(false);
+      return;
+    }
+    await save(fresh.notice.version, training);
+  }
+
+  return (
+    <View style={styles.account} testID="photo-settings">
+      <Text style={styles.label}>Your photos</Text>
+
+      {pending ? (
+        <>
+          <Text style={styles.hint}>There&apos;s a new photo notice. Read it, then answer again.</Text>
+          <PhotoNoticeView
+            notice={pending.notice}
+            training={pending.training}
+            onTrainingChange={(training) => setPending({ ...pending, training })}
+            onSubmit={() => {
+              setBusy(true);
+              setProblem(null);
+              void save(pending.notice.version, pending.training);
+            }}
+            submitting={busy}
+            problem={problem}
+            submitLabel="Save my answer"
+          />
+        </>
+      ) : (
+        <>
+          {problem && <ProblemBanner problem={problem} />}
+          <View style={styles.switchRow}>
+            <Text style={[styles.statusText, styles.switchLabel]}>Keep my photos to improve the PPE detector</Text>
+            {busy ? (
+              <ActivityIndicator />
+            ) : (
+              <Switch
+                value={consent?.training ?? false}
+                onValueChange={(value) => void change(value)}
+                disabled={!consent}
+                accessibilityLabel="Keep my photos to improve the PPE detector"
+                testID="settings-training-switch"
+              />
+            )}
+          </View>
+          {saved && <Text style={[styles.statusText, styles.connected]}>{saved}</Text>}
+          {consent && (
+            <Pressable onPress={() => setShowNotice((shown) => !shown)} accessibilityRole="button">
+              <Text style={styles.linkText}>{showNotice ? "Hide the photo notice" : "Read the photo notice"}</Text>
+            </Pressable>
+          )}
+          {consent && showNotice && <Text style={styles.hint}>{consent.notice.text}</Text>}
+        </>
+      )}
+
+      <Text style={styles.hint}>To have your photos deleted, ask your supervisor.</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
+  },
+  switchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  switchLabel: {
+    flex: 1,
+  },
+  linkText: {
+    color: "#1d6fd6",
+    fontWeight: "600",
   },
   container: {
     padding: 20,

@@ -10,8 +10,10 @@ import {
 
 import {
   ApiError,
+  answerConsent,
   changeWorkerPin,
   clearToken,
+  getConsent,
   getJobs,
   getToken,
   getWorkerMe,
@@ -21,7 +23,13 @@ import {
   workerLogout,
 } from "../api/client";
 import { problemFrom, type Problem } from "../api/problems";
-import type { ComplianceCheckResponse, JobsResponse, WorkerInfo } from "../api/types";
+import type {
+  ComplianceCheckResponse,
+  ConsentState,
+  JobsResponse,
+  PhotoNotice,
+  WorkerInfo,
+} from "../api/types";
 import { titleCase } from "../format";
 import { addHistoryEntry, getHistory, type HistoryEntry } from "../storage/history";
 
@@ -86,6 +94,36 @@ interface SessionState {
   history: HistoryEntry[];
   /** False until the initial AsyncStorage read completes — lets History tell "loading" from "genuinely empty". */
   historyLoaded: boolean;
+
+  /**
+   * The photo notice and this worker's answer, as the server last said
+   * (docs/checks-api.md §5). Asked after sign-in and the PIN change; null
+   * until then, or when the server couldn't say.
+   */
+  consent: ConsentState | null;
+  /**
+   * The worker has a notice to answer: never answered, or a newer version
+   * since. The root layout shows the notice while this is true. If the
+   * server can't say, it stays false: a check is never refused for consent,
+   * and photos just aren't kept until the worker answers.
+   */
+  noticeNeeded: boolean;
+  /** GET the notice and answer again; resolves to it, or null if the server couldn't say. */
+  refreshConsent: () => Promise<ConsentState | null>;
+  /**
+   * PUT the worker's answer to notice `version`. Rejects with the ApiError; on
+   * 409 notice_changed the newer notice is already in `consent` to show.
+   */
+  answerNotice: (version: number, training: boolean) => Promise<ConsentState>;
+}
+
+/** The notice a 409 notice_changed carries, if it has one (docs/checks-api.md §5). */
+export function noticeFrom(err: unknown): PhotoNotice | null {
+  if (!(err instanceof ApiError) || err.code !== "notice_changed") return null;
+  const notice = err.body?.notice as Partial<PhotoNotice> | undefined;
+  return notice && typeof notice.version === "number" && typeof notice.text === "string"
+    ? (notice as PhotoNotice)
+    : null;
 }
 
 const SessionContext = createContext<SessionState | undefined>(undefined);
@@ -120,6 +158,14 @@ export function SessionProvider({
   const [lastImageUri, setLastImageUri] = useState<string | null>(null);
   const [allHistory, setAllHistory] = useState<HistoryEntry[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [consent, setConsent] = useState<ConsentState | null>(null);
+
+  // The consent belongs to one worker, once their own PIN is chosen (the server refuses before).
+  const consentFor =
+    auth.kind === "signedIn" && !auth.mustChangePin ? auth.worker.worker_id : null;
+  // The worker the latest consent request is for: an answer for anyone else is dropped.
+  const consentForRef = useRef<string | null>(null);
+  consentForRef.current = consentFor;
 
   useEffect(() => {
     if (!initialAuth) void restoreSession();
@@ -130,6 +176,14 @@ export function SessionProvider({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // After sign-in and the PIN change (and on start-up with a saved session): is a photo notice owed?
+  // Declared after the effect above, so the job list is still asked for first.
+  useEffect(() => {
+    setConsent(null);
+    if (consentFor) void refreshConsent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consentFor]);
 
   /** Is the saved token still good? A reachable server decides; an unreachable one just asks for a fresh sign-in. */
   async function restoreSession() {
@@ -231,6 +285,40 @@ export function SessionProvider({
     );
   }
 
+  async function refreshConsent(): Promise<ConsentState | null> {
+    const asked = consentForRef.current;
+    try {
+      const answer = await getConsent();
+      if (consentForRef.current !== asked) return null; // signed out, or someone else, meanwhile
+      setConsent(answer);
+      return answer;
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "not_authenticated") expireSession();
+      else if (err instanceof ApiError && err.code === "pin_change_required") requirePinChange();
+      // Anything else (offline, a server without this endpoint): no notice now. Checks still work.
+      return null;
+    }
+  }
+
+  async function answerNotice(version: number, training: boolean): Promise<ConsentState> {
+    try {
+      const answer = await answerConsent(version, training);
+      setConsent(answer);
+      return answer;
+    } catch (err) {
+      const newer = noticeFrom(err);
+      if (newer) setConsent((current) => (current ? { ...current, notice: newer } : current));
+      if (err instanceof ApiError && err.code === "not_authenticated") expireSession();
+      else if (err instanceof ApiError && err.code === "pin_change_required") requirePinChange();
+      throw err;
+    }
+  }
+
+  const noticeNeeded =
+    consentFor !== null &&
+    consent !== null &&
+    (consent.seen_version === null || consent.seen_version < consent.notice.version);
+
   function recordCheck(result: ComplianceCheckResponse, imageUri: string) {
     setLastCheck(result);
     setLastImageUri(imageUri);
@@ -270,6 +358,10 @@ export function SessionProvider({
         recordCheck,
         history,
         historyLoaded,
+        consent,
+        noticeNeeded,
+        refreshConsent,
+        answerNotice,
       }}
     >
       {children}
