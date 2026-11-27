@@ -170,13 +170,24 @@ Setting `PPB_WORKER_AUTH`:
 
 | Value | No token sent | Token sent |
 |---|---|---|
-| `optional` (default during Phase 2) | Works as today, using the `worker_id` form field; logged as unauthenticated | `worker_id` from the token |
+| `optional` (default during rollout) | Works as today, using the `worker_id` form field; logged as unauthenticated | `worker_id` from the token |
 | `required` | `401 not_authenticated` | `worker_id` from the token |
 
-Order of release:
+Order of release (tracked in the [release checklist](release-checklist.md)):
 1. The backend ships with `optional`. The current app keeps working. ✅
-2. The app ships its login screen. ✅ (PR #11)
-3. The server is switched to `required`, when the conditions below are met.
+2. The company's privacy reviewer approves the photo notice wording
+   (`checks-api.md` §5 and §10, point 1). This blocks any app release.
+3. After approval, Priyanka prepares the release build with login, the photo
+   notice, the name "PPB Check" and the new icon. Login is implemented
+   (PR #11); the release build is still pending. Expo Go shows its own name
+   and icon.
+4. The release build reaches every phone in use, confirmed by each site's
+   supervisor.
+5. Harshit switches the server to `required` when both conditions below
+   are met.
+
+Notice wording comes from the server. Wording-only changes make a new notice
+version and need no app update (`checks-api.md` §5).
 
 ### When to switch to `required`
 
@@ -184,24 +195,30 @@ Switching too early locks out every phone still running an app without
 login. Switching late leaves checks that aren't tied to a signed-in worker.
 So the switch happens when **both** of these are true:
 
-1. **Every phone in use runs the login build** (the app from PR #11 or
-   later). The supervisor of each site confirms it for their site.
+1. **Every phone in use runs the release build above**, including login and
+   the photo notice after its wording passes privacy review. The supervisor
+   of each site confirms it for their site.
 2. **The server has seen no check without a login for 3 working days in a
    row.** The backend logs every such check as `[<worker_id>, not signed
-   in]`, so the log shows whether any old app is still in use. Once checks
-   are stored (Phase 5), the dashboard can show this count instead.
+   in]`, so the log shows whether any old app is still in use. The
+   dashboard's Settings page also shows the count from stored checks
+   (`checks-api.md` §4.1). A zero count does not replace site confirmations.
 
 Then:
 
 - **Who:** Harshit (an admin).
 - **How:** `PPB_WORKER_AUTH=required` in `.env` and a restart, or the
-  `worker_auth` setting in the dashboard once Phase 3 is built (which also
-  records it in the audit log). Once a value has been saved in the dashboard
+  `worker_auth` setting in the dashboard (which also records it in the
+  audit log). Once a value has been saved in the dashboard
   it wins over `.env`: `GET /settings` shows `overridden: true`, and a later
   edit of `.env` has no effect until the override is cleared (`null`).
 - **Undo:** set it back to `optional`. Phones with the login build keep
   working either way.
 - **Record it:** add the date of the switch to this section.
+
+**Cutover status:** pending; no switch date recorded. Keep the site
+confirmations, observation dates and cutover verification in the
+[release checklist](release-checklist.md#3-required-worker-login--p7).
 
 ### Other endpoints
 

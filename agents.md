@@ -495,6 +495,24 @@ LOG_LEVEL=INFO
 | P7    | Login: admin & supervisor accounts, worker login (built into FastAPI; contract `docs/auth-api.md`) | ✅ Built (backend, app, dashboard login) — switch to `PPB_WORKER_AUTH=required` per `docs/auth-api.md` §5 pending |
 | P8    | Live video mode                                       | ⬜ Future    |
 
+### Open completion gates
+
+The [release checklist](docs/release-checklist.md) records the remaining
+decisions, owners and completion evidence:
+
+1. **Privacy review blocks any app release.** Once the notice wording
+   passes, Priyanka prepares the release build, where "PPB Check" and the
+   new icon first appear on the phone. Wording-only changes are server
+   changes and need no app update (`docs/checks-api.md` §5).
+2. **P5 stays unfinished** until the last three decisions are recorded:
+   confirmations on Reset password, Reset PIN and Deactivate; editing your
+   own name; and requirement order in the job matrix. Complete and verify
+   any resulting changes before marking P5 finished.
+3. **P7 cutover waits on item 1 and rollout.** Keep worker login optional
+   until every phone in use has the release build, each site confirms it,
+   and there are no unsigned checks for three working days in a row. Then
+   Harshit switches to `required` under `docs/auth-api.md` §5.
+
 ---
 
 ## 15. Admin System — Decisions (2026-10-15)

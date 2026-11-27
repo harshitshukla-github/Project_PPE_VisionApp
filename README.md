@@ -216,8 +216,14 @@ uv run python cli.py auth reset-pin --worker-id W-0042                 # new one
 
 `PPB_WORKER_AUTH=optional` (the default) keeps today's app working: a check
 without a token uses the `worker_id` form field. Switch it to `required` only
-after the app ships its login screen. Set `PPB_COOKIE_SECURE=false` only to
-use the dashboard over plain `http://` on a LAN address.
+after the notice wording passes privacy review, Priyanka's release build
+reaches every phone in use with confirmation from each site, and the server
+sees no unsigned checks for three working days in a row. Track these gates
+and the three remaining P5 decisions in the
+[release checklist](docs/release-checklist.md); see
+[the cutover procedure](docs/auth-api.md#5-changes-to-existing-endpoints)
+for dashboard overrides and rollback. Set `PPB_COOKIE_SECURE=false` only
+to use the dashboard over plain `http://` on a LAN address.
 
 `tests/test_auth_api.py` calls every route without credentials; a new route
 that forgets its login check fails CI until it is either protected or added
