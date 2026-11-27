@@ -1143,6 +1143,34 @@ def auth_reset_pin_cmd(
     _print_one_time_pin(worker.worker_code, worker.display_name, pin)
 
 
+@auth_app.command("reset-password")
+def auth_reset_password_cmd(
+    email: str = typer.Option(..., "--email", help="The dashboard account's email."),
+) -> None:
+    """
+    Issue a **temporary password** for a dashboard account, unlock it, and sign it
+    out everywhere.
+
+    The dashboard can only reset someone else's password, so this is how an admin
+    who has forgotten theirs gets back in, even the only admin.
+    """
+    from src.admin.users import reset_password_by_email
+
+    user, password = _run_account_command(lambda db: reset_password_by_email(db, email))
+    console.print(
+        Panel.fit(
+            f"Dashboard {user.role} [bold]{user.email}[/bold] ({user.display_name})\n"
+            f"Temporary password: [bold]{password}[/bold]\n\n"
+            "Hand this over. They must choose their own password when they next\n"
+            "sign in. It is not stored anywhere and can't be shown again.",
+            title="New password",
+        )
+    )
+    if not user.is_active:
+        console.print("[yellow]This account is deactivated: it can't sign in until an admin "
+                      "reactivates it.[/yellow]")
+
+
 # ---------------------------------------------------------------------------
 # sites commands (docs/admin-api.md §3)
 # ---------------------------------------------------------------------------

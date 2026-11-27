@@ -455,6 +455,10 @@ Any field may be left out. `200 OK` with `{ "user": … }`.
 sessions and unlocks them. Resetting your own password here is refused
 (`409 cannot_change_self`); use `POST /auth/password`.
 
+An admin who has forgotten their password, with no other admin to reset it
+here, runs `cli.py auth reset-password --email …` on the server
+(`auth-api.md` §7). It is the same reset, recorded as actor `cli`.
+
 ---
 
 ## 8. Workers — admin, supervisor (own site)

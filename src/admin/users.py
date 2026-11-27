@@ -135,6 +135,30 @@ def reset_password(db: Session, user_id: int, me: User, actor: str, ip: str | No
     if user.id == me.id:
         raise ApiError(409, "cannot_change_self",
                        "Change your own password with POST /auth/password.")
+    return _issue_temporary_password(db, user, actor, ip)
+
+
+def reset_password_by_email(db: Session, email: str, actor: str = audit.CLI_ACTOR,
+                            ip: str | None = None) -> tuple[User, str]:
+    """The same reset, for ``cli.py auth reset-password`` on the server (issue #37).
+
+    For any account, the only admin's included: it is how an admin who has
+    forgotten their password gets back in when no other admin can reset it.
+    A deactivated account gets the password too, and stays deactivated.
+
+    Raises:
+        ValueError: No dashboard account has that email.
+    """
+    address = normalize_email(email)
+    user = db.scalar(select(User).where(User.email == address).with_for_update())
+    if user is None:
+        db.rollback()
+        raise ValueError(f"No dashboard account for {address}.")
+    return user, _issue_temporary_password(db, user, actor, ip)
+
+
+def _issue_temporary_password(db: Session, user: User, actor: str, ip: str | None) -> str:
+    """Set a temporary password, unlock the user, end their sessions, and commit."""
     password = temporary_password()
     user.password_hash = hash_secret(password)
     user.must_change_password = True

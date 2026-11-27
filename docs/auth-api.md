@@ -307,12 +307,19 @@ from the CLI:
 uv run python cli.py auth create-admin --email admin@example.com --name "Harshit"
 uv run python cli.py auth create-worker --worker-id W-0042 --name "Asha Verma"
 uv run python cli.py auth reset-pin --worker-id W-0042
+uv run python cli.py auth reset-password --email admin@example.com
 ```
 
 - `create-admin` asks for the password twice at a hidden prompt.
 - `create-worker` and `reset-pin` print a **one-time PIN** for the
   supervisor to hand over. The worker must replace it at first login.
   `reset-pin` also unlocks a locked worker.
+- `reset-password` does what the dashboard's reset does
+  (`admin-api.md` §7): it prints a **temporary password**, which must be
+  replaced at the next sign-in, unlocks the account and ends all its
+  sessions. Unlike the dashboard, it works on any account, the only admin's
+  included, so an admin who has forgotten their password can get back in. The
+  audit log records it as actor `cli`.
 
 ---
 

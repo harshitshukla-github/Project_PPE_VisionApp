@@ -212,6 +212,7 @@ uv run python cli.py db migrate                                        # creates
 uv run python cli.py auth create-admin --email you@example.com --name "Your Name"
 uv run python cli.py auth create-worker --worker-id W-0042 --name "Asha Verma"   # prints a one-time PIN
 uv run python cli.py auth reset-pin --worker-id W-0042                 # new one-time PIN, unlocks
+uv run python cli.py auth reset-password --email you@example.com       # temporary password, unlocks
 ```
 
 `PPB_WORKER_AUTH=optional` (the default) keeps today's app working: a check
