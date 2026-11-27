@@ -158,11 +158,14 @@ export default function SettingsScreen() {
  *
  * Changing the choice asks the server first. If a newer notice has come out
  * since the worker last answered, it is shown here before anything is saved,
- * and the answer goes with that version; otherwise the choice is saved at once.
+ * with training at "No" whatever the worker just chose: a newer notice can ask
+ * something different (a longer period, say), so a "Yes" to it must be given
+ * after reading it (§5, "off until they say yes"). The answer goes with that
+ * version. Otherwise the choice is saved at once.
  */
 function PhotoSettings() {
   const { consent, refreshConsent, answerNotice } = useSession();
-  // A newer notice to read before the choice is saved, with the choice the worker just made.
+  // A newer notice to read before anything is saved, and the worker's answer to it so far.
   const [pending, setPending] = useState<{ notice: PhotoNotice; training: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -207,7 +210,7 @@ function PhotoSettings() {
       return;
     }
     if (fresh.seen_version === null || fresh.seen_version < fresh.notice.version) {
-      setPending({ notice: fresh.notice, training });
+      setPending({ notice: fresh.notice, training: false });
       setBusy(false);
       return;
     }
@@ -220,7 +223,7 @@ function PhotoSettings() {
 
       {pending ? (
         <>
-          <Text style={styles.hint}>There&apos;s a new photo notice. Read it before your choice is saved.</Text>
+          <Text style={styles.hint}>There&apos;s a new photo notice. Read it, then answer again.</Text>
           <PhotoNoticeView
             notice={pending.notice}
             training={pending.training}

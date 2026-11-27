@@ -105,18 +105,35 @@ describe("SettingsScreen: your photos (docs/checks-api.md §5)", () => {
     expect(await screen.findByText("Saved. Your photos may be kept to improve the PPE detector.")).toBeTruthy();
   });
 
-  it("shows a newer notice first, with the choice just made, and saves the answer to that version", async () => {
+  it("shows a newer notice first, on 'No' though the worker just turned training on, and saves 'No' if left so", async () => {
+    // Not a pre-ticked box (§5, "off until they say yes"): the newer notice may ask something
+    // different, so the "Yes" given to the old wording doesn't carry over.
     mockConsent = state(NOTICE_1, 1, false);
     mockRefreshConsent.mockResolvedValue(state(NOTICE_2, 1, false));
-    mockAnswerNotice.mockResolvedValue(state(NOTICE_2, 2, true));
+    mockAnswerNotice.mockResolvedValue(state(NOTICE_2, 2, false));
     render(<SettingsScreen />);
 
     fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
 
     expect(await screen.findByText(NOTICE_2.text)).toBeTruthy();
     expect(mockAnswerNotice).not.toHaveBeenCalled(); // nothing saved before it is read
-    expect(screen.getByTestId("training-switch").props.value).toBe(true);
+    expect(screen.getByTestId("training-switch").props.value).toBe(false);
 
+    fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
+
+    await waitFor(() => expect(mockAnswerNotice).toHaveBeenCalledWith(2, false));
+    expect(mockAnswerNotice).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Saved. Your photos won't be kept for training.")).toBeTruthy();
+  });
+
+  it("keeps a 'Yes' given on the newer notice itself, and saves it to that version", async () => {
+    mockConsent = state(NOTICE_1, 1, false);
+    mockRefreshConsent.mockResolvedValue(state(NOTICE_2, 1, false));
+    mockAnswerNotice.mockResolvedValue(state(NOTICE_2, 2, true));
+    render(<SettingsScreen />);
+
+    fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+    fireEvent(await screen.findByTestId("training-switch"), "valueChange", true);
     fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
 
     await waitFor(() => expect(mockAnswerNotice).toHaveBeenCalledWith(2, true));
