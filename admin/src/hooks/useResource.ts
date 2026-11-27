@@ -57,14 +57,19 @@ export function usePages<T>(
   deps: DependencyList,
 ) {
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
-  const index = cursors.length - 1;
-  const resource = useResource(() => load(cursors[index]), [...deps, cursors]);
+  const [filters, setFilters] = useState<DependencyList>(deps);
 
-  // New filters: back to the first page.
-  useEffect(() => {
+  // New filters: back to the first page, decided while rendering rather than in an effect
+  // afterwards. Resetting in an effect loaded twice: once with the old page's cursor (page 2's,
+  // with the new filters), then again from page 1 when the reset landed.
+  const filtersChanged = !sameDeps(filters, deps);
+  if (filtersChanged) {
+    setFilters(deps);
     setCursors([null]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }
+  const current = filtersChanged ? [null] : cursors;
+  const index = current.length - 1;
+  const resource = useResource(() => load(current[index]), [...deps, current.length, current[index]]);
 
   const page = resource.data;
   const first = page && page.items.length ? index * pageSize + 1 : 0;
@@ -77,4 +82,9 @@ export function usePages<T>(
     next: () => page?.next_cursor && setCursors((c) => [...c, page.next_cursor]),
     previous: () => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c)),
   };
+}
+
+/** Whether two dependency lists hold the same values, compared as React compares effect deps. */
+function sameDeps(a: DependencyList, b: DependencyList): boolean {
+  return a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
 }

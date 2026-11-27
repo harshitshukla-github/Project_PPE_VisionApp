@@ -53,7 +53,7 @@ const OTHER_WORKER_RESULT: ComplianceCheckResponse = {
   timestamp: "2026-07-31T09:00:00.000Z",
 };
 
-function renderHistory() {
+async function renderHistory() {
   return render(
     <SessionProvider initialAuth={SIGNED_IN}>
       <HistoryScreen />
@@ -71,20 +71,36 @@ beforeEach(async () => {
 
 describe("HistoryScreen", () => {
   it("shows a loading spinner before the AsyncStorage read resolves, not the empty state", async () => {
-    renderHistory();
+    // Hold the read open: `await render` (testing library 14) settles every finished promise first,
+    // so a read that resolves at once would be done before the first look.
+    // Only the history read is held; others (the server address for the job list) answer as usual.
+    // (Swapped by hand: the storage mock's getItem is itself a jest.fn, and restoring a spy on it
+    // would wipe it for the tests after this one.)
+    let finishRead: (value: string | null) => void = () => {};
+    const realGetItem = AsyncStorage.getItem;
+    AsyncStorage.getItem = ((key: string) =>
+      key.includes("history")
+        ? new Promise<string | null>((resolve) => (finishRead = resolve))
+        : realGetItem(key)) as typeof AsyncStorage.getItem;
+    try {
+    await renderHistory();
 
     // historyLoaded starts false — must not claim "no checks" before we've
     // actually finished reading AsyncStorage, even though the list is [] either way.
     expect(
       screen.queryByText("No checks yet — completed compliance checks will show up here."),
     ).toBeNull();
-    expect(screen.UNSAFE_queryByType(require("react-native").ActivityIndicator)).toBeTruthy();
+    expect(screen.getByTestId("history-loading")).toBeTruthy();
 
+    finishRead(null);
     await screen.findByText("No checks yet — completed compliance checks will show up here.");
+    } finally {
+      AsyncStorage.getItem = realGetItem;
+    }
   });
 
   it("shows an empty state when nothing has been checked yet", async () => {
-    renderHistory();
+    await renderHistory();
 
     expect(
       await screen.findByText("No checks yet — completed compliance checks will show up here."),
@@ -95,7 +111,7 @@ describe("HistoryScreen", () => {
     await addHistoryEntry(PASS_RESULT, "file:///W-0042.jpg");
     await addHistoryEntry(FAIL_RESULT, "file:///W-0099.jpg");
 
-    renderHistory();
+    await renderHistory();
 
     expect(await screen.findByText("FAIL")).toBeTruthy();
     expect(screen.getByText("General Labor")).toBeTruthy();
@@ -108,7 +124,7 @@ describe("HistoryScreen", () => {
     await addHistoryEntry(PASS_RESULT, "file:///mine.jpg");
     await addHistoryEntry(OTHER_WORKER_RESULT, "file:///theirs.jpg");
 
-    renderHistory();
+    await renderHistory();
 
     expect(await screen.findByText("Welder")).toBeTruthy();
     expect(screen.queryByText("General Labor")).toBeNull();
@@ -118,7 +134,7 @@ describe("HistoryScreen", () => {
   it("matches the worker ID without regard to case, as the server does", async () => {
     await addHistoryEntry({ ...PASS_RESULT, worker_id: "w-0042" }, "file:///lower.jpg");
 
-    renderHistory();
+    await renderHistory();
 
     expect(await screen.findByText("Welder")).toBeTruthy();
   });
@@ -129,7 +145,7 @@ describe("HistoryScreen", () => {
       "file:///review.jpg",
     );
 
-    renderHistory();
+    await renderHistory();
 
     const label = await screen.findByText("REVIEW");
     expect(label).toHaveStyle({ color: "#8a6100" });
@@ -141,7 +157,7 @@ describe("HistoryScreen", () => {
     await addHistoryEntry(FAIL_RESULT, "file:///2.jpg");
     await addHistoryEntry({ ...PASS_RESULT, verdict: "NEEDS_REVIEW" }, "file:///3.jpg");
 
-    renderHistory();
+    await renderHistory();
 
     expect(await screen.findByText("PASS")).toHaveStyle({ color: "#1a7f37" });
     expect(screen.getByText("FAIL")).toHaveStyle({ color: "#c0392b" });
@@ -151,8 +167,8 @@ describe("HistoryScreen", () => {
   it("navigates to the detail route with the entry's id on tap", async () => {
     const [entry] = await addHistoryEntry(PASS_RESULT, "file:///W-0042.jpg");
 
-    renderHistory();
-    fireEvent.press(await screen.findByText("Welder"));
+    await renderHistory();
+    await fireEvent.press(await screen.findByText("Welder"));
 
     expect(mockPush).toHaveBeenCalledWith(`/history-detail?id=${entry.id}`);
   });

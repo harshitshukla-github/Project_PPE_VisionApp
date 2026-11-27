@@ -71,7 +71,7 @@ function server(options: {
  * The real layout, Login, Change PIN and notice screens; plain stand-ins for the rest,
  * Settings included unless the test passes the real one.
  */
-function renderApp(options: { settings?: () => React.JSX.Element } = {}) {
+async function renderApp(options: { settings?: () => React.JSX.Element } = {}) {
   return renderRouter(
     {
       _layout: RootLayout,
@@ -101,7 +101,7 @@ beforeEach(async () => {
 
 async function pressContinue() {
   await act(async () => {
-    fireEvent.press(screen.getByRole("button", { name: "Continue" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Continue" }));
   });
 }
 
@@ -109,7 +109,7 @@ describe("when the notice shows (docs/checks-api.md §5)", () => {
   it("shows it, in the server's words, to a worker who has never answered it", async () => {
     server({ get: () => json(200, consent(NOTICE_1, null)) });
 
-    renderApp();
+    await renderApp();
 
     expect(await screen.findByText(NOTICE_1.text)).toBeTruthy();
     expect(screen.getByText(NOTICE_1.training_question)).toBeTruthy();
@@ -119,7 +119,7 @@ describe("when the notice shows (docs/checks-api.md §5)", () => {
   it("shows it again when there is a newer version than the one they answered", async () => {
     server({ get: () => json(200, consent(NOTICE_2, 1, true)) });
 
-    renderApp();
+    await renderApp();
 
     expect(await screen.findByText(NOTICE_2.text)).toBeTruthy();
   });
@@ -127,7 +127,7 @@ describe("when the notice shows (docs/checks-api.md §5)", () => {
   it("opens the app when the current version is already answered", async () => {
     server({ get: () => json(200, consent(NOTICE_1, 1)) });
 
-    renderApp();
+    await renderApp();
 
     expect(await screen.findByText("HOME-STUB")).toBeTruthy();
     expect(screen.queryByTestId("photo-notice")).toBeNull();
@@ -136,7 +136,7 @@ describe("when the notice shows (docs/checks-api.md §5)", () => {
   it("opens the app when the server can't say (a check is never refused for consent)", async () => {
     server({ get: () => json(404, { detail: "Not Found" }) });
 
-    renderApp();
+    await renderApp();
 
     expect(await screen.findByText("HOME-STUB")).toBeTruthy();
     await waitFor(() =>
@@ -147,16 +147,16 @@ describe("when the notice shows (docs/checks-api.md §5)", () => {
 
   it("comes after the PIN change, not before: the server refuses consent until the PIN is the worker's own", async () => {
     server({ meChangePin: true, get: () => json(200, consent(NOTICE_1, null)) });
-    renderApp();
+    await renderApp();
     expect(await screen.findByText("Choose your own PIN")).toBeTruthy();
     expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith("/auth/worker/consent"))).toBe(false);
 
-    fireEvent.changeText(screen.getByPlaceholderText("The PIN you were given"), "482913");
+    await fireEvent.changeText(screen.getByPlaceholderText("The PIN you were given"), "482913");
     const [next, again] = screen.getAllByPlaceholderText("6 digits");
-    fireEvent.changeText(next, "730154");
-    fireEvent.changeText(again, "730154");
+    await fireEvent.changeText(next, "730154");
+    await fireEvent.changeText(again, "730154");
     await act(async () => {
-      fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
     });
 
     expect(await screen.findByText(NOTICE_1.text)).toBeTruthy();
@@ -166,7 +166,7 @@ describe("when the notice shows (docs/checks-api.md §5)", () => {
 describe("answering it", () => {
   it("sends the version shown, with training off unless the worker says yes, then opens the app", async () => {
     const answers = server({ get: () => json(200, consent(NOTICE_1, null)) });
-    renderApp();
+    await renderApp();
     await screen.findByText(NOTICE_1.text);
     expect(screen.getByTestId("training-switch").props.value).toBe(false);
 
@@ -178,10 +178,10 @@ describe("answering it", () => {
 
   it("sends training: true when the worker turns the switch on", async () => {
     const answers = server({ get: () => json(200, consent(NOTICE_1, null)) });
-    renderApp();
+    await renderApp();
     await screen.findByText(NOTICE_1.text);
 
-    fireEvent(screen.getByTestId("training-switch"), "valueChange", true);
+    await fireEvent(screen.getByTestId("training-switch"), "valueChange", true);
     expect(screen.getByText("Yes")).toBeTruthy();
     await pressContinue();
 
@@ -197,9 +197,9 @@ describe("answering it", () => {
           ? json(409, { detail: "The notice has changed since the app showed it.", code: "notice_changed", notice: NOTICE_2 })
           : json(200, consent(NOTICE_2, body.version, body.training)),
     });
-    renderApp();
+    await renderApp();
     await screen.findByText(NOTICE_1.text);
-    fireEvent(screen.getByTestId("training-switch"), "valueChange", true);
+    await fireEvent(screen.getByTestId("training-switch"), "valueChange", true);
 
     await pressContinue();
 
@@ -219,7 +219,7 @@ describe("answering it", () => {
 
   it("stays on the notice and says so when the answer can't be saved", async () => {
     server({ get: () => json(200, consent(NOTICE_1, null)), put: () => json(503, { detail: "Busy.", code: "auth_unavailable" }) });
-    renderApp();
+    await renderApp();
     await screen.findByText(NOTICE_1.text);
 
     await pressContinue();
@@ -244,7 +244,7 @@ describe("a newer notice while Settings is open", () => {
         return json(200, current);
       },
     });
-    const app = renderApp({ settings: SettingsScreen });
+    const app = await renderApp({ settings: SettingsScreen });
     expect(await screen.findByText("HOME-STUB")).toBeTruthy();
 
     await act(async () => router.push("/settings"));
@@ -252,7 +252,7 @@ describe("a newer notice while Settings is open", () => {
 
     current = consent(NOTICE_2, 1);
     await act(async () => {
-      fireEvent(screen.getByTestId("settings-training-switch"), "valueChange", true);
+      await fireEvent(screen.getByTestId("settings-training-switch"), "valueChange", true);
     });
 
     // The session now knows a notice is owed. The app's screens stay as they were behind
@@ -268,7 +268,7 @@ describe("a newer notice while Settings is open", () => {
     const { app, answers } = await openSettingsAndFindNewerNotice();
 
     await act(async () => {
-      fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
     });
     expect(await screen.findByText("Saved. Your photos won't be kept for training.")).toBeTruthy();
     expect(answers).toEqual([{ version: 2, training: false }]);
@@ -301,12 +301,12 @@ describe("a newer notice while Settings is open", () => {
           ? json(409, { detail: "The notice has changed since the app showed it.", code: "notice_changed", notice: NOTICE_2 })
           : json(200, consent(NOTICE_2, body.version, body.training)),
     });
-    const app = renderApp({ settings: SettingsScreen });
+    const app = await renderApp({ settings: SettingsScreen });
     expect(await screen.findByText("HOME-STUB")).toBeTruthy();
     await act(async () => router.push("/settings"));
 
     await act(async () => {
-      fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+      await fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
     });
 
     expect(await screen.findByText(NOTICE_2.text)).toBeTruthy();
@@ -315,7 +315,7 @@ describe("a newer notice while Settings is open", () => {
     expect(app.getPathname()).toBe("/settings");
 
     await act(async () => {
-      fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
     });
     expect(answers).toEqual([
       { version: 1, training: true },

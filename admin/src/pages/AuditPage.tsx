@@ -15,6 +15,8 @@ const ACTIONS = [
   "settings.update",
   "user.create", "user.update", "user.reset_password",
   "worker.create", "worker.update", "worker.reset_pin",
+  // docs/checks-api.md §8
+  "check.review", "worker.photos_delete", "worker.consent", "photos.purge", "photos.export",
 ];
 
 interface Filters {
@@ -109,7 +111,7 @@ export function AuditPage() {
         </label>
         <label>
           Who
-          <input value={draft.actor} onChange={(e) => setDraft({ ...draft, actor: e.target.value })} placeholder="email, or cli" />
+          <input value={draft.actor} onChange={(e) => setDraft({ ...draft, actor: e.target.value })} placeholder="email, cli or worker:W-0042" />
         </label>
         <label>
           Site

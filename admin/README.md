@@ -1,23 +1,33 @@
 # PPB admin dashboard
 
 React + Vite + TypeScript, served by FastAPI at `/admin` in production
-(AGENTS.md §15). Built to [`docs/auth-api.md`](../docs/auth-api.md) §6 (sign-in)
-and [`docs/admin-api.md`](../docs/admin-api.md) (everything else).
+(AGENTS.md §15). Built to [`docs/auth-api.md`](../docs/auth-api.md) §6 (sign-in),
+[`docs/admin-api.md`](../docs/admin-api.md), and
+[`docs/checks-api.md`](../docs/checks-api.md) (checks, photos and review, Phase 6).
 
 ## Pages
 
 | Page | Who | What it does |
 |---|---|---|
 | Matrix | admin, supervisor | Jobs × items grid, each cell Required / Manual / Off, saved a row at a time with the job's version. Shows each item's AP50 or "Gemini only", the server's warnings as badges, and, on a `409 version_conflict`, what the other person changed (using `current`). A supervisor sees it read-only. |
+| Checks | admin, supervisor | Every stored check, newest first, with filters (verdict, review, worker, job, login, site, dates) and paging. A supervisor starts on their site's checks waiting for review; the navigation shows how many. `#/checks?worker=W-0042` opens one worker's checks. |
+| A check (`#/checks/1001`) | admin, supervisor | The photo with the detector's boxes drawn on it, what the job required then, Gemini's findings, the three settings the verdict was decided with, and the review: any verdict, once; an admin can replace one. If someone reviews it first, their review is shown, not overwritten. |
 | Jobs | admin | Add, rename, reorder, deactivate. Never deletes: checks refer to jobs by key. |
-| Workers | admin, supervisor | Search, site, status and "locked out now" filters, paging ("26–50 of 312"), add, edit, move (admin), deactivate, reset PIN. The one-time PIN is shown once. A supervisor sees only their own site. |
+| Workers | admin, supervisor | Search, site, status and "locked out now" filters, paging ("26–50 of 312"), add, edit, move (admin), deactivate, reset PIN. The one-time PIN is shown once. A supervisor sees only their own site. Each worker links to their checks; an admin can delete a worker's photos, after a confirmation that counts them. |
 | Sites | admin | Add, rename, deactivate (refused while a site has active workers or supervisors). |
 | Users | admin | Add (temporary password shown once), edit role and site, reset password, deactivate. You can't act on your own account. |
-| Settings | admin | The form is generated from `GET /settings`; saves a merge patch of what changed, all or nothing, and asks first where a setting says `confirm`. |
+| Settings | admin | The form is generated from `GET /settings`; saves a merge patch of what changed, all or nothing, and asks first where a setting says `confirm`. Next to worker login, the number of checks without a login over the last 3 working days (`auth-api.md` §5). |
 | Audit log | admin | Filters by action, target, who, site and date; paging; click a row for before/after. |
 
-Not built, on purpose: a view for supervisors to review checks. Checks aren't
-stored until Phase 5 (`docs/admin-api.md` §10).
+**Until the backend's Phase 6 lands**, the real server has no `/admin/checks`
+endpoints. The Checks pages then say "This server doesn't have this part of the
+dashboard yet", the navigation shows no count, and Settings leaves the count
+out. With `VITE_ADMIN_API=mock` (below) they work against sample checks.
+
+The photo is loaded from its own address (`/api/v1/admin/checks/{id}/photo`),
+which the page's `img-src 'self'` policy allows, and the boxes are an SVG laid
+over it in the photo's own pixels, drawn with attributes and classes only
+(the page policy forbids inline styles).
 
 ## Run it
 

@@ -54,7 +54,7 @@ function Seed({ result }: { result: ComplianceCheckResponse }) {
   return null;
 }
 
-function renderResult(result?: ComplianceCheckResponse) {
+async function renderResult(result?: ComplianceCheckResponse) {
   return render(
     <SessionProvider>
       {result && <Seed result={result} />}
@@ -72,13 +72,13 @@ beforeEach(() => {
 
 describe("ResultScreen", () => {
   it("shows an empty state when there's no check yet", async () => {
-    renderResult();
+    await renderResult();
 
     expect(await screen.findByText("No check yet")).toBeTruthy();
   });
 
   it("renders a PASS result with detections and unverifiable equipment in amber", async () => {
-    renderResult(PASS_RESULT);
+    await renderResult(PASS_RESULT);
 
     expect(await screen.findByText("PASS")).toBeTruthy();
     expect(screen.getByText("Hardhat — 85%")).toBeTruthy();
@@ -88,7 +88,7 @@ describe("ResultScreen", () => {
   });
 
   it("renders a FAIL result with explanation, missing equipment, and violations", async () => {
-    renderResult(FAIL_RESULT);
+    await renderResult(FAIL_RESULT);
 
     expect(await screen.findByText("FAIL")).toBeTruthy();
     expect(
@@ -101,7 +101,7 @@ describe("ResultScreen", () => {
   });
 
   it("renders NEEDS_REVIEW as a non-accusing amber state with 'Retake photo' as the action", async () => {
-    renderResult({
+    await renderResult({
       ...PASS_RESULT,
       verdict: "NEEDS_REVIEW",
       detections: [],
@@ -120,15 +120,15 @@ describe("ResultScreen", () => {
   });
 
   it("keeps 'Check again' as the action for PASS and FAIL", async () => {
-    renderResult(PASS_RESULT);
+    await renderResult(PASS_RESULT);
     expect(await screen.findByText("Check again")).toBeTruthy();
     expect(screen.queryByText("Retake photo")).toBeNull();
   });
 
   it("loops back to Capture from 'Retake photo'", async () => {
-    renderResult({ ...PASS_RESULT, verdict: "NEEDS_REVIEW", missing_equipment: ["gloves"] });
+    await renderResult({ ...PASS_RESULT, verdict: "NEEDS_REVIEW", missing_equipment: ["gloves"] });
 
-    fireEvent.press(await screen.findByText("Retake photo"));
+    await fireEvent.press(await screen.findByText("Retake photo"));
 
     expect(mockReplace).toHaveBeenCalledWith("/capture");
   });

@@ -67,7 +67,7 @@ describe("SessionProvider: restoring a saved sign-in", () => {
   it("is signed out, without asking the server, when no token is saved", async () => {
     mockRoutes(mockFetch, { "/jobs": ok({}) });
 
-    render(<SessionProvider><Probe /></SessionProvider>);
+    await render(<SessionProvider><Probe /></SessionProvider>);
 
     await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("signedOut"));
     expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith("/auth/worker/me"))).toBe(false);
@@ -77,7 +77,7 @@ describe("SessionProvider: restoring a saved sign-in", () => {
     await setToken("tok-123");
     mockRoutes(mockFetch, { "/jobs": ok({}), "/auth/worker/me": ok(ME) });
 
-    render(<SessionProvider><Probe /></SessionProvider>);
+    await render(<SessionProvider><Probe /></SessionProvider>);
 
     await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("signed-in"));
     expect(screen.getByTestId("worker")).toHaveTextContent("W-0042");
@@ -90,7 +90,7 @@ describe("SessionProvider: restoring a saved sign-in", () => {
       "/auth/worker/me": ok({ ...ME, must_change_pin: true }),
     });
 
-    render(<SessionProvider><Probe /></SessionProvider>);
+    await render(<SessionProvider><Probe /></SessionProvider>);
 
     await waitFor(() =>
       expect(screen.getByTestId("auth")).toHaveTextContent("signed-in-must-change-pin"),
@@ -104,7 +104,7 @@ describe("SessionProvider: restoring a saved sign-in", () => {
       "/auth/worker/me": fail(401, { detail: "expired", code: "not_authenticated" }),
     });
 
-    render(<SessionProvider><Probe /></SessionProvider>);
+    await render(<SessionProvider><Probe /></SessionProvider>);
 
     await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("signedOut"));
     expect(screen.getByTestId("notice")).toHaveTextContent("Your session ended. Sign in again.");
@@ -118,7 +118,7 @@ describe("SessionProvider: restoring a saved sign-in", () => {
       "/auth/worker/me": fail(503, { detail: "no db", code: "auth_unavailable" }),
     });
 
-    render(<SessionProvider><Probe /></SessionProvider>);
+    await render(<SessionProvider><Probe /></SessionProvider>);
 
     await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("signedOut"));
     expect(screen.getByTestId("notice")).toHaveTextContent(/Try again shortly/);
@@ -133,7 +133,7 @@ describe("SessionProvider: history on a shared phone", () => {
     await setToken("tok-123");
     mockRoutes(mockFetch, { "/jobs": ok({}), "/auth/worker/me": ok(ME) });
 
-    render(<SessionProvider><Probe /></SessionProvider>);
+    await render(<SessionProvider><Probe /></SessionProvider>);
 
     await waitFor(() => expect(screen.getByTestId("history")).toHaveTextContent(mine.id));
     expect(screen.getByTestId("history").props.children).not.toContain(",");

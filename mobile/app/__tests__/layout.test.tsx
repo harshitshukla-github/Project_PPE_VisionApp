@@ -26,7 +26,7 @@ const ME = {
  * The real root layout and the real Login / Change PIN screens, with plain
  * stand-ins for the camera-heavy tabs: this tests the routing gate only.
  */
-function renderApp() {
+async function renderApp() {
   return renderRouter(
     {
       _layout: RootLayout,
@@ -56,7 +56,7 @@ describe("root layout sign-in gate (docs/auth-api.md §8)", () => {
   it("opens Login, not the app, when nobody is signed in", async () => {
     mockRoutes(mockFetch, { "/jobs": ok({}) });
 
-    renderApp();
+    await renderApp();
 
     expect(await screen.findByPlaceholderText("W-0042")).toBeTruthy();
     expect(screen.queryByText("HOME-STUB")).toBeNull();
@@ -66,7 +66,7 @@ describe("root layout sign-in gate (docs/auth-api.md §8)", () => {
     await setToken("tok-123");
     mockRoutes(mockFetch, { "/jobs": ok({}), "/auth/worker/me": ok(ME) });
 
-    renderApp();
+    await renderApp();
 
     expect(await screen.findByText("HOME-STUB")).toBeTruthy();
     expect(screen.queryByPlaceholderText("W-0042")).toBeNull();
@@ -79,7 +79,7 @@ describe("root layout sign-in gate (docs/auth-api.md §8)", () => {
       "/auth/worker/me": ok({ ...ME, must_change_pin: true }),
     });
 
-    renderApp();
+    await renderApp();
 
     expect(await screen.findByText("Choose your own PIN")).toBeTruthy();
     expect(screen.queryByText("HOME-STUB")).toBeNull();
@@ -92,7 +92,7 @@ describe("root layout sign-in gate (docs/auth-api.md §8)", () => {
       "/auth/worker/me": fail(401, { detail: "expired", code: "not_authenticated" }),
     });
 
-    renderApp();
+    await renderApp();
 
     expect(await screen.findByText("Your session ended. Sign in again.")).toBeTruthy();
     expect(screen.queryByText("HOME-STUB")).toBeNull();
@@ -109,13 +109,13 @@ describe("root layout sign-in gate (docs/auth-api.md §8)", () => {
         worker: ME.worker,
       }),
     });
-    renderApp();
+    await renderApp();
     const idField = await screen.findByPlaceholderText("W-0042");
 
-    fireEvent.changeText(idField, "W-0042");
-    fireEvent.changeText(screen.getByPlaceholderText("6 digits"), "482913");
+    await fireEvent.changeText(idField, "W-0042");
+    await fireEvent.changeText(screen.getByPlaceholderText("6 digits"), "482913");
     await act(async () => {
-      fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
     });
 
     await waitFor(() => expect(screen.getByText("HOME-STUB")).toBeTruthy());

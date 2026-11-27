@@ -69,25 +69,25 @@ describe("SettingsScreen: your photos (docs/checks-api.md §5)", () => {
 
   it("shows the worker's training choice, the notice to read again, and who to ask about deleting photos", async () => {
     mockConsent = state(NOTICE_1, 1, true);
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     expect(await screen.findByTestId("photo-settings")).toBeTruthy();
     expect(screen.getByTestId("settings-training-switch").props.value).toBe(true);
     expect(screen.getByText("To have your photos deleted, ask your supervisor.")).toBeTruthy();
     expect(screen.queryByText(NOTICE_1.text)).toBeNull();
 
-    fireEvent.press(screen.getByText("Read the photo notice"));
+    await fireEvent.press(screen.getByText("Read the photo notice"));
     expect(screen.getByText(NOTICE_1.text)).toBeTruthy();
   });
 
   it("isn't shown to someone signed out, or still on the issued PIN (the server refuses consent then)", async () => {
     mockAuth = { kind: "signedOut" };
-    const { unmount } = render(<SettingsScreen />);
+    const { unmount } = await render(<SettingsScreen />);
     expect(screen.queryByTestId("photo-settings")).toBeNull();
-    unmount();
+    await unmount();
 
     mockAuth = { kind: "signedIn", mustChangePin: true, worker: { worker_id: "W-0042", display_name: "Asha Verma" } };
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
     expect(screen.queryByTestId("photo-settings")).toBeNull();
     expect(screen.getByText(/Signed in as Asha Verma/)).toBeTruthy();
   });
@@ -96,9 +96,9 @@ describe("SettingsScreen: your photos (docs/checks-api.md §5)", () => {
     mockConsent = state(NOTICE_1, 1, false);
     mockRefreshConsent.mockResolvedValue(state(NOTICE_1, 1, false));
     mockAnswerNotice.mockResolvedValue(state(NOTICE_1, 1, true));
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
-    fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+    await fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
 
     await waitFor(() => expect(mockAnswerNotice).toHaveBeenCalledWith(1, true));
     expect(mockRefreshConsent).toHaveBeenCalled();
@@ -111,15 +111,15 @@ describe("SettingsScreen: your photos (docs/checks-api.md §5)", () => {
     mockConsent = state(NOTICE_1, 1, false);
     mockRefreshConsent.mockResolvedValue(state(NOTICE_2, 1, false));
     mockAnswerNotice.mockResolvedValue(state(NOTICE_2, 2, false));
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
-    fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+    await fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
 
     expect(await screen.findByText(NOTICE_2.text)).toBeTruthy();
     expect(mockAnswerNotice).not.toHaveBeenCalled(); // nothing saved before it is read
     expect(screen.getByTestId("training-switch").props.value).toBe(false);
 
-    fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
 
     await waitFor(() => expect(mockAnswerNotice).toHaveBeenCalledWith(2, false));
     expect(mockAnswerNotice).toHaveBeenCalledTimes(1);
@@ -130,11 +130,11 @@ describe("SettingsScreen: your photos (docs/checks-api.md §5)", () => {
     mockConsent = state(NOTICE_1, 1, false);
     mockRefreshConsent.mockResolvedValue(state(NOTICE_2, 1, false));
     mockAnswerNotice.mockResolvedValue(state(NOTICE_2, 2, true));
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
-    fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
-    fireEvent(await screen.findByTestId("training-switch"), "valueChange", true);
-    fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
+    await fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+    await fireEvent(await screen.findByTestId("training-switch"), "valueChange", true);
+    await fireEvent.press(screen.getByRole("button", { name: "Save my answer" }));
 
     await waitFor(() => expect(mockAnswerNotice).toHaveBeenCalledWith(2, true));
     expect(await screen.findByText("Saved. Your photos may be kept to improve the PPE detector.")).toBeTruthy();
@@ -143,9 +143,9 @@ describe("SettingsScreen: your photos (docs/checks-api.md §5)", () => {
   it("says so when the server can't be asked, and saves nothing", async () => {
     mockConsent = state(NOTICE_1, 1, false);
     mockRefreshConsent.mockResolvedValue(null);
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
-    fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
+    await fireEvent(await screen.findByTestId("settings-training-switch"), "valueChange", true);
 
     expect(await screen.findByText("Couldn't reach the server to change this. Try again.")).toBeTruthy();
     expect(mockAnswerNotice).not.toHaveBeenCalled();
@@ -154,7 +154,7 @@ describe("SettingsScreen: your photos (docs/checks-api.md §5)", () => {
 
 describe("SettingsScreen account section", () => {
   it("hides Log out while nobody is signed in (Settings is reachable from Login)", async () => {
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     await screen.findByText("Not tested yet.");
     expect(screen.queryByTestId("logout-button")).toBeNull();
@@ -165,10 +165,10 @@ describe("SettingsScreen account section", () => {
       kind: "signedIn",
       worker: { worker_id: "W-0042", display_name: "Test Worker" },
     };
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     expect(await screen.findByText("Signed in as Test Worker (W-0042)")).toBeTruthy();
-    fireEvent.press(screen.getByTestId("logout-button"));
+    await fireEvent.press(screen.getByTestId("logout-button"));
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/login"));
     expect(mockSignOut).toHaveBeenCalledTimes(1);
@@ -177,7 +177,7 @@ describe("SettingsScreen account section", () => {
 
 describe("SettingsScreen", () => {
   it("shows 'Not tested yet' with no saved URL", async () => {
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     expect(await screen.findByText("Not tested yet.")).toBeTruthy();
     expect(mockFetch).not.toHaveBeenCalled();
@@ -195,7 +195,7 @@ describe("SettingsScreen", () => {
       }),
     });
 
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     expect(
       await screen.findByText("Connected ✓ — yolo26n on cpu"),
@@ -217,11 +217,11 @@ describe("SettingsScreen", () => {
       }),
     });
 
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     const input = screen.getByPlaceholderText("http://192.168.1.5:8000");
-    fireEvent.changeText(input, "  http://192.168.68.116:8000/  ");
-    fireEvent.press(screen.getByText("Save & Test Connection"));
+    await fireEvent.changeText(input, "  http://192.168.68.116:8000/  ");
+    await fireEvent.press(screen.getByText("Save & Test Connection"));
 
     expect(await screen.findByText("Connected ✓ — yolo26n on cpu")).toBeTruthy();
     await expect(AsyncStorage.getItem("@ppb/server_url")).resolves.toBe(
@@ -232,13 +232,13 @@ describe("SettingsScreen", () => {
   it("shows a 'not connected' error when the health check fails", async () => {
     mockFetch.mockRejectedValueOnce(new TypeError("Network request failed"));
 
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
-    fireEvent.changeText(
+    await fireEvent.changeText(
       screen.getByPlaceholderText("http://192.168.1.5:8000"),
       "http://192.168.68.116:8000",
     );
-    fireEvent.press(screen.getByText("Save & Test Connection"));
+    await fireEvent.press(screen.getByText("Save & Test Connection"));
 
     expect(
       await screen.findByText(/Not connected ✗ — Can't reach server/),
@@ -246,10 +246,10 @@ describe("SettingsScreen", () => {
   });
 
   it("shows an error and does not save when the input is empty", async () => {
-    render(<SettingsScreen />);
+    await render(<SettingsScreen />);
 
     await waitFor(() => screen.getByText("Not tested yet."));
-    fireEvent.press(screen.getByText("Save & Test Connection"));
+    await fireEvent.press(screen.getByText("Save & Test Connection"));
 
     expect(
       await screen.findByText("Not connected ✗ — Enter a server URL first."),
@@ -269,12 +269,12 @@ describe("SettingsScreen", () => {
       }),
     });
 
-    render(<SettingsScreen />);
-    fireEvent.changeText(
+    await render(<SettingsScreen />);
+    await fireEvent.changeText(
       screen.getByPlaceholderText("http://192.168.1.5:8000"),
       "http://192.168.68.116:8000",
     );
-    fireEvent.press(screen.getByText("Save & Test Connection"));
+    await fireEvent.press(screen.getByText("Save & Test Connection"));
 
     expect(
       await screen.findByText(

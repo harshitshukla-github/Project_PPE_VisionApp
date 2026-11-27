@@ -39,7 +39,7 @@ function Probe() {
   return <Text testID="auth-probe">{label}</Text>;
 }
 
-function renderLogin(initialAuth: AuthState = SIGNED_OUT) {
+async function renderLogin(initialAuth: AuthState = SIGNED_OUT) {
   return render(
     <SessionProvider initialAuth={initialAuth}>
       <Probe />
@@ -48,9 +48,9 @@ function renderLogin(initialAuth: AuthState = SIGNED_OUT) {
   );
 }
 
-function fill(workerId: string, pin: string) {
-  fireEvent.changeText(screen.getByPlaceholderText("W-0042"), workerId);
-  fireEvent.changeText(screen.getByPlaceholderText("6 digits"), pin);
+async function fill(workerId: string, pin: string) {
+  await fireEvent.changeText(screen.getByPlaceholderText("W-0042"), workerId);
+  await fireEvent.changeText(screen.getByPlaceholderText("6 digits"), pin);
 }
 
 beforeEach(async () => {
@@ -63,33 +63,33 @@ beforeEach(async () => {
 
 describe("LoginScreen", () => {
   it("keeps Sign in disabled until there is a worker ID and a 6-digit PIN", async () => {
-    renderLogin();
+    await renderLogin();
     const button = await screen.findByRole("button", { name: "Sign in" });
     expect(button).toBeDisabled();
 
-    fill("W-0042", "12345");
+    await fill("W-0042", "12345");
     expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
 
-    fill("W-0042", "123456");
+    await fill("W-0042", "123456");
     expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
   });
 
   it("only accepts digits in the PIN field", async () => {
-    renderLogin();
+    await renderLogin();
     await screen.findByPlaceholderText("W-0042");
 
-    fill("W-0042", "12a4-56");
+    await fill("W-0042", "12a4-56");
 
     expect(screen.getByPlaceholderText("6 digits").props.value).toBe("12456");
   });
 
   it("signs in: stores the token and moves the session to signed-in", async () => {
     mockRoutes(mockFetch, { "/jobs": ok({}), "/auth/worker/login": ok(LOGIN_OK) });
-    renderLogin();
+    await renderLogin();
     await screen.findByPlaceholderText("W-0042");
 
-    fill("W-0042", "482913");
-    fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
+    await fill("W-0042", "482913");
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
 
     await waitFor(() => expect(screen.getByTestId("auth-probe")).toHaveTextContent("signed-in"));
     await expect(getToken()).resolves.toBe("tok-123");
@@ -101,11 +101,11 @@ describe("LoginScreen", () => {
       "/jobs": ok({}),
       "/auth/worker/login": ok({ ...LOGIN_OK, must_change_pin: true }),
     });
-    renderLogin();
+    await renderLogin();
     await screen.findByPlaceholderText("W-0042");
 
-    fill("W-0042", "482913");
-    fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
+    await fill("W-0042", "482913");
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
 
     await waitFor(() =>
       expect(screen.getByTestId("auth-probe")).toHaveTextContent("signed-in-must-change-pin"),
@@ -117,11 +117,11 @@ describe("LoginScreen", () => {
       "/jobs": ok({}),
       "/auth/worker/login": fail(401, { detail: "Wrong worker ID or PIN.", code: "invalid_credentials" }),
     });
-    renderLogin();
+    await renderLogin();
     await screen.findByPlaceholderText("W-0042");
 
-    fill("W-0042", "000000");
-    fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
+    await fill("W-0042", "000000");
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
 
     expect(await screen.findByText("Wrong worker ID or PIN.")).toBeTruthy();
     expect(screen.getByTestId("problem-error")).toBeTruthy();
@@ -139,11 +139,11 @@ describe("LoginScreen", () => {
         retry_after_s: 840,
       }),
     });
-    renderLogin();
+    await renderLogin();
     await screen.findByPlaceholderText("W-0042");
 
-    fill("W-0042", "000000");
-    fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
+    await fill("W-0042", "000000");
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
 
     expect(await screen.findByText(/Try again in 14 minutes/)).toBeTruthy();
   });
@@ -157,11 +157,11 @@ describe("LoginScreen", () => {
         retry_after_s: 30,
       }),
     });
-    renderLogin();
+    await renderLogin();
     await screen.findByPlaceholderText("W-0042");
 
-    fill("W-0042", "000000");
-    fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
+    await fill("W-0042", "000000");
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
 
     expect(await screen.findByText("Too many attempts. Wait 30 seconds and try again.")).toBeTruthy();
   });
@@ -171,11 +171,11 @@ describe("LoginScreen", () => {
       "/jobs": ok({}),
       "/auth/worker/login": fail(503, { detail: "Login is unavailable.", code: "auth_unavailable" }),
     });
-    renderLogin();
+    await renderLogin();
     await screen.findByPlaceholderText("W-0042");
 
-    fill("W-0042", "482913");
-    fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
+    await fill("W-0042", "482913");
+    await fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
 
     expect(await screen.findByText(/Try again shortly/)).toBeTruthy();
     expect(screen.getByTestId("problem-notice")).toBeTruthy();
@@ -185,13 +185,13 @@ describe("LoginScreen", () => {
   it("pre-fills the last worker ID that signed in on this phone", async () => {
     await AsyncStorage.setItem("@ppb/worker_id", "W-0042");
 
-    renderLogin();
+    await renderLogin();
 
     expect(await screen.findByDisplayValue("W-0042")).toBeTruthy();
   });
 
   it("explains why the worker is back here after a session ended", async () => {
-    renderLogin({
+    await renderLogin({
       kind: "signedOut",
       notice: { message: "Your session ended. Sign in again.", tone: "error" },
     });
@@ -200,14 +200,14 @@ describe("LoginScreen", () => {
   });
 
   it("shows only a spinner while the saved sign-in is being checked", async () => {
-    renderLogin({ kind: "loading" });
+    await renderLogin({ kind: "loading" });
 
-    expect(screen.UNSAFE_queryByType(require("react-native").ActivityIndicator)).toBeTruthy();
+    expect(screen.getByTestId("session-checking")).toBeTruthy();
     expect(screen.queryByPlaceholderText("W-0042")).toBeNull();
   });
 
   it("keeps Settings reachable, since the server URL must be set before the first login", async () => {
-    renderLogin();
+    await renderLogin();
 
     expect(await screen.findByText("Settings")).toBeTruthy();
   });

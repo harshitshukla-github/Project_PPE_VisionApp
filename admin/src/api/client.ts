@@ -16,11 +16,15 @@ import type {
   AdminUser,
   AuditEntry,
   AuditQuery,
+  Check,
+  CheckQuery,
+  CheckSummary,
   Item,
   Job,
   JobResult,
   Page,
   Requirement,
+  ReviewOutcome,
   Role,
   Setting,
   SettingsPatch,
@@ -435,6 +439,60 @@ export const getAudit = (q: AuditQuery = {}) =>
       cursor: q.cursor,
     })}`,
   );
+
+// ---- checks (docs/checks-api.md) -------------------------------------------
+
+/** §4.1: newest first, paged. A supervisor always gets their own site. */
+export const getChecks = (q: CheckQuery = {}) =>
+  request<Page<CheckSummary>>(
+    "GET",
+    `/admin/checks${query({
+      site: q.site,
+      worker: q.worker,
+      job: q.job,
+      verdict: q.verdict,
+      reviewed: q.reviewed,
+      signed_in: q.signed_in,
+      from: q.from,
+      to: q.to,
+      limit: q.limit,
+      cursor: q.cursor,
+    })}`,
+  );
+
+/** §4.2 */
+export const getCheck = (id: number) => request<Check>("GET", `/admin/checks/${id}`);
+
+/**
+ * §4.3. Any verdict; once, unless an admin sends `replace`. The contract
+ * doesn't give the response's shape: this takes `{ check }`, like the other
+ * writes (`{ worker }`, `{ site }`).
+ */
+export const reviewCheck = (id: number, review: { outcome: ReviewOutcome; note?: string; replace?: boolean }) =>
+  request<{ check: Check }>("POST", `/admin/checks/${id}/review`, review);
+
+/** §4.4, admin only: deletes every stored photo of the worker. Their checks stay. */
+export const deleteWorkerPhotos = (workerId: string) =>
+  request<{ deleted: number }>("DELETE", `/admin/workers/${workerId}/photos`);
+
+/**
+ * What to put in an `<img src>` for a check's photo (§4.2).
+ *
+ * From the real server it is the photo's own address: same origin, so the
+ * session cookie goes with it and the page's `img-src 'self'` allows it.
+ * The stand-in can't answer a request the browser makes by itself, so its
+ * photo is fetched here and handed over as a data URL (the stand-in only runs
+ * in development, where there is no page policy).
+ */
+export async function checkPhotoSrc(id: number): Promise<string> {
+  const path = `/admin/checks/${id}/photo`;
+  if (!adminApiIsMocked()) return `${API}${path}`;
+  const send = await transportFor(path);
+  const response = await send(`${API}${path}`, { method: "GET", credentials: "same-origin" });
+  if (!response.ok) throw await toApiError(response);
+  const svg = await response.text();
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
 
 /** For tests: forget everything this module remembers. */
 export function resetClientState(): void {

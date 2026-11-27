@@ -38,6 +38,20 @@ function localMidnight(day: string, plusDays: number): string | undefined {
 export const startOfDay = (day: string): string | undefined => localMidnight(day, 0);
 
 /**
+ * Local midnight at the start of the `n`th working day (Monday to Friday)
+ * before today. With 3 it is the window `auth-api.md` §5 counts checks without
+ * a login over: on a Wednesday, from the Friday before.
+ */
+export function workingDaysBack(n: number, today: Date = new Date()): Date {
+  const day = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  for (let counted = 0; counted < n; ) {
+    day.setDate(day.getDate() - 1);
+    if (day.getDay() !== 0 && day.getDay() !== 6) counted++;
+  }
+  return day;
+}
+
+/**
  * The start of the day after the picked one, for the API's exclusive `to`:
  * picking 2 November as the last day means everything before 3 November begins.
  */

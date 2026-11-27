@@ -97,6 +97,13 @@ export function problemFrom(err: unknown, fallback: string): Problem {
   }
   if (!(err instanceof ApiError)) return { message: fallback, tone: "error" };
 
+  // Every 404 the contracts define carries `not_found`. One without a code is FastAPI's own
+  // "no such route": a server that doesn't have this part yet (the checks endpoints, until the
+  // backend's Phase 6 lands). Not the person's doing, and "Not Found" wouldn't tell them anything.
+  if (err.status === 404 && !err.code) {
+    return { message: "This server doesn't have this part of the dashboard yet. It needs updating.", tone: "notice" };
+  }
+
   switch (err.code) {
     case "invalid_credentials":
       return { message: "Wrong email or password.", tone: "error" };

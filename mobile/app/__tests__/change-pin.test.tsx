@@ -31,7 +31,7 @@ function Probe() {
   return <Text testID="auth-probe">{label}</Text>;
 }
 
-function renderChangePin() {
+async function renderChangePin() {
   return render(
     <SessionProvider initialAuth={{ ...SIGNED_IN, mustChangePin: true } as never}>
       <Probe />
@@ -42,11 +42,11 @@ function renderChangePin() {
 
 const [CURRENT, NEW, CONFIRM] = ["The PIN you were given", "6 digits", "6 digits"];
 
-function fillAll(current: string, next: string, confirm: string) {
-  fireEvent.changeText(screen.getByPlaceholderText(CURRENT), current);
+async function fillAll(current: string, next: string, confirm: string) {
+  await fireEvent.changeText(screen.getByPlaceholderText(CURRENT), current);
   const sixDigit = screen.getAllByPlaceholderText(NEW);
-  fireEvent.changeText(sixDigit[0], next);
-  fireEvent.changeText(sixDigit[1], confirm);
+  await fireEvent.changeText(sixDigit[0], next);
+  await fireEvent.changeText(sixDigit[1], confirm);
 }
 
 beforeEach(async () => {
@@ -61,24 +61,24 @@ beforeEach(async () => {
 
 describe("ChangePinScreen", () => {
   it("keeps Save disabled until the new PIN is 6 digits and typed the same twice", async () => {
-    renderChangePin();
+    await renderChangePin();
     await screen.findByText("Choose your own PIN");
 
-    fillAll("482913", "730154", "730155");
+    await fillAll("482913", "730154", "730155");
     expect(screen.getByRole("button", { name: "Save new PIN" })).toBeDisabled();
     expect(screen.getByText("The two PINs don't match.")).toBeTruthy();
 
-    fillAll("482913", "730154", "730154");
+    await fillAll("482913", "730154", "730154");
     expect(screen.getByRole("button", { name: "Save new PIN" })).toBeEnabled();
   });
 
   it("changes the PIN with the token, then clears must-change-pin so the app opens", async () => {
     mockRoutes(mockFetch, { "/jobs": ok({}), "/auth/worker/pin": noContent });
-    renderChangePin();
+    await renderChangePin();
     await screen.findByText("Choose your own PIN");
 
-    fillAll("482913", "730154", "730154");
-    fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
+    await fillAll("482913", "730154", "730154");
+    await fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
 
     await waitFor(() => expect(screen.getByTestId("auth-probe")).toHaveTextContent("signed-in"));
     const call = mockFetch.mock.calls.find(([url]) => String(url).endsWith("/auth/worker/pin"));
@@ -94,11 +94,11 @@ describe("ChangePinScreen", () => {
         code: "weak_pin",
       }),
     });
-    renderChangePin();
+    await renderChangePin();
     await screen.findByText("Choose your own PIN");
 
-    fillAll("482913", "123456", "123456");
-    fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
+    await fillAll("482913", "123456", "123456");
+    await fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
 
     expect(await screen.findByText(/too easy to guess/)).toBeTruthy();
     expect(screen.getByTestId("auth-probe")).toHaveTextContent("must-change-pin");
@@ -109,11 +109,11 @@ describe("ChangePinScreen", () => {
       "/jobs": ok({}),
       "/auth/worker/pin": fail(401, { detail: "Wrong PIN.", code: "invalid_credentials" }),
     });
-    renderChangePin();
+    await renderChangePin();
     await screen.findByText("Choose your own PIN");
 
-    fillAll("000000", "730154", "730154");
-    fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
+    await fillAll("000000", "730154", "730154");
+    await fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
 
     expect(await screen.findByText("That isn't your current PIN.")).toBeTruthy();
   });
@@ -123,11 +123,11 @@ describe("ChangePinScreen", () => {
       "/jobs": ok({}),
       "/auth/worker/pin": fail(401, { detail: "Sign in again.", code: "not_authenticated" }),
     });
-    renderChangePin();
+    await renderChangePin();
     await screen.findByText("Choose your own PIN");
 
-    fillAll("482913", "730154", "730154");
-    fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
+    await fillAll("482913", "730154", "730154");
+    await fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
 
     await waitFor(() => expect(screen.getByTestId("auth-probe")).toHaveTextContent("signedOut"));
     await expect(getToken()).resolves.toBeNull();
@@ -138,11 +138,11 @@ describe("ChangePinScreen", () => {
       "/jobs": ok({}),
       "/auth/worker/pin": fail(503, { detail: "unavailable", code: "auth_unavailable" }),
     });
-    renderChangePin();
+    await renderChangePin();
     await screen.findByText("Choose your own PIN");
 
-    fillAll("482913", "730154", "730154");
-    fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
+    await fillAll("482913", "730154", "730154");
+    await fireEvent.press(screen.getByRole("button", { name: "Save new PIN" }));
 
     expect(await screen.findByTestId("problem-notice")).toBeTruthy();
     expect(screen.getByText(/Try again shortly/)).toBeTruthy();
@@ -150,10 +150,10 @@ describe("ChangePinScreen", () => {
 
   it("lets the worker sign out instead", async () => {
     mockRoutes(mockFetch, { "/jobs": ok({}), "/auth/worker/logout": noContent });
-    renderChangePin();
+    await renderChangePin();
     await screen.findByText("Choose your own PIN");
 
-    fireEvent.press(screen.getByText("Sign out"));
+    await fireEvent.press(screen.getByText("Sign out"));
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/login"));
     expect(screen.getByTestId("auth-probe")).toHaveTextContent("signedOut");
