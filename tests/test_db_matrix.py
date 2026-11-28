@@ -56,11 +56,48 @@ class TestMigrations:
         upgrade_to_head(URL)
         assert current_revision(URL) == head_revision()
 
+    def test_0006_puts_stored_lists_head_to_toe(self, seeded_db: Engine) -> None:
+        """Lists saved before 0006 kept the order they were entered in."""
+        command.downgrade(alembic_config(URL), "0005")
+        entered = ["boots", "face_shield", "gloves", "hardhat", "goggles", "safety_vest"]
+        with Session(seeded_db) as session, session.begin():
+            welder = session.scalar(select(Job.id).where(Job.key == "welder"))
+            for position, item in enumerate(entered):
+                session.execute(update(JobRequirement).where(
+                    JobRequirement.job_id == welder, JobRequirement.item_key == item,
+                ).values(position=position))
+            version = session.scalar(select(Job.version).where(Job.id == welder))
+        assert read_matrix(seeded_db)["welder"]["required"][0] == "boots"
+
+        upgrade_to_head(URL)
+
+        assert read_matrix(seeded_db)["welder"] == {
+            "required": ["hardhat", "goggles", "safety_vest", "gloves", "boots"],
+            "pending": ["face_shield"],
+        }
+        with Session(seeded_db) as session:
+            positions = session.execute(
+                select(JobRequirement.item_key, JobRequirement.position)
+                .where(JobRequirement.job_id == welder).order_by(JobRequirement.position)
+            ).all()
+            assert positions == [("hardhat", 0), ("goggles", 1), ("face_shield", 2),
+                                 ("safety_vest", 3), ("gloves", 4), ("boots", 5)]
+            assert session.scalar(select(Job.version).where(Job.id == welder)) == version
+
 
 class TestSeed:
     def test_database_matrix_matches_the_yaml_exactly(self, seeded_db: Engine) -> None:
         """Same jobs, same lists, same order: the app must see no difference."""
         assert list(read_matrix(seeded_db).items()) == list(_yaml_matrix().items())
+
+    def test_each_list_reads_head_to_toe_whatever_the_yaml_order(
+        self, seeded_db: Engine
+    ) -> None:
+        """The YAML lists electrician's gloves before goggles; both sources put goggles first."""
+        expected = {"required": ["hardhat", "goggles", "safety_vest", "gloves", "boots"],
+                    "pending": []}
+        assert read_matrix(seeded_db)["electrician"] == expected
+        assert _yaml_matrix()["electrician"] == expected
 
     def test_every_item_is_catalogued(self, seeded_db: Engine) -> None:
         with Session(seeded_db) as session:

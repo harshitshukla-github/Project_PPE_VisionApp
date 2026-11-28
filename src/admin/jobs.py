@@ -17,6 +17,7 @@ from src.admin import audit, runtime
 from src.admin.common import check_key, clean_name
 from src.admin.views import job_view, requirements_view
 from src.api.errors import ApiError
+from src.db.matrix import item_rank
 from src.db.models import Job, JobRequirement, PpeItem, RequirementMode
 from src.inference.compliance import invalidate_job_matrix_cache
 
@@ -54,6 +55,15 @@ def _validated(db: Session, requirements: list[dict[str, str]]) -> dict[str, Ppe
         raise ApiError(422, "no_required_item", "A job needs at least one required item.",
                        field="requirements")
     return items
+
+
+def _head_to_toe(requirements: list[dict[str, str]]) -> list[dict[str, str]]:
+    """The list in the items' order (docs/admin-api.md §5), whatever order it was sent in.
+
+    Sort only after :func:`_validated`, whose errors name entries by their index in
+    the list as sent.
+    """
+    return sorted(requirements, key=lambda req: item_rank(req["item"]))
 
 
 def _warnings(items: dict[str, PpeItem], requirements: list[dict[str, str]]) -> list[dict]:
@@ -112,6 +122,7 @@ def create_job(db: Session, key: str, display_name: str, requirements: list[dict
     key = check_key(key)
     name = clean_name(display_name)
     items = _validated(db, requirements)
+    requirements = _head_to_toe(requirements)
     position = (db.scalar(select(func.max(Job.position))) or -1) + 1
     job = Job(key=key, display_name=name, position=position)
     db.add(job)
@@ -167,6 +178,8 @@ def replace_requirements(db: Session, key: str, version: Any,
     job = _locked(db, key)
     _check_version(job, version)
     items = _validated(db, requirements)
+    # Sorted first, so the same items sent in another order are no change at all.
+    requirements = _head_to_toe(requirements)
     before = requirements_view(job)
     if before != requirements:
         _set_requirements(db, job, requirements)

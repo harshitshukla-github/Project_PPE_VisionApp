@@ -227,11 +227,11 @@ the dashboard can't add or remove them.
   "version": 4,
   "requirements": [
     { "item": "hardhat", "mode": "required" },
-    { "item": "safety_vest", "mode": "required" },
     { "item": "goggles", "mode": "required" },
+    { "item": "face_shield", "mode": "pending" },
+    { "item": "safety_vest", "mode": "required" },
     { "item": "gloves", "mode": "required" },
-    { "item": "boots", "mode": "required" },
-    { "item": "face_shield", "mode": "pending" }
+    { "item": "boots", "mode": "required" }
   ],
   "updated_at": "2026-10-16T10:12:00Z"
 }
@@ -240,7 +240,10 @@ the dashboard can't add or remove them.
 - `mode` is `required` (checked by the detector, then Gemini) or `pending`
   (listed for the worker as "verify manually", never scored). An item not in
   the list isn't asked for.
-- The list's order is the order the app shows.
+- The list is always head to toe, in the items' order (§4), whatever order
+  it was sent in: the server sorts it on every save. That is the order the
+  app shows. Sending the same items in another order is no change, so the
+  version stays the same and nothing is audited (decision 9 in §12).
 - Every job, active or not, has at least one required item.
 - `key` never changes after creation: checks and the app refer to jobs by
   key. Rename with `display_name`.
@@ -444,6 +447,8 @@ Any field may be left out. `200 OK` with `{ "user": … }`.
 - Making someone an admin clears their site. Making someone a supervisor
   needs a site in the same request.
 - Deactivating a user ends all their sessions at once.
+- You may change your own `display_name`; the dashboard offers it on your own
+  row (decision 8 in §12).
 - Errors: `404 not_found` (the user, or an unknown `site`),
   `409 cannot_change_self` (your own role, site or active flag),
   `409 last_admin` (no active admin would remain), `422 invalid` (including a
@@ -675,3 +680,27 @@ Answered in Priyanka's review of the first draft (PR #10), and adopted:
    `detector_ap50` from the loaded model's metrics file (§4).
 6. **Sites: in scope now** (decided by Harshit), so `site_id` is added to
    workers and users in this phase rather than retrofitted later.
+
+Decided by Harshit after the dashboard's re-test (P5):
+
+7. **Confirmations: yes, before Reset password, Reset PIN and Deactivate,**
+   for users and for workers. Each one signs the person out everywhere at
+   once, and a reset makes their password or PIN stop working, so one
+   mis-click shouldn't do it. The dialog names the person and says what
+   happens, like "Delete photos" does: "Reset Asha Verma's PIN? Their
+   current PIN stops working and they're signed out of the app. You'll get a
+   one-time PIN to hand over." Reactivate and Edit need none: they take
+   nothing away. The server is unchanged; this is the dashboard.
+8. **Editing your own name: yes.** The API already allows it (§7,
+   `PATCH /users/{id}` refuses only your own role, site and active flag).
+   On your own row, Edit opens with just the name; role and site stay
+   locked, with the existing hint. Reset password and Deactivate stay off
+   on your own row.
+9. **Requirement order: head to toe, kept by the server.** A job's equipment
+   used to follow the order its boxes were ticked, and an item switched on
+   in the Matrix went last, so the app's list didn't read head to toe. The
+   server now sorts every list into the items' order on save (§5), the YAML
+   is read the same way, and migration `0006` sorted the lists already
+   stored. Nobody reorders items by hand. The dashboard needs no change,
+   except that the mock backend sorts the same way, so its pages match the
+   real server.
