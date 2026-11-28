@@ -136,7 +136,18 @@ export function OnceSecret({
   );
 }
 
-/** Asks before a change that deserves it (docs/admin-api.md §6 `confirm`). */
+/**
+ * An action waiting for "yes": one that takes something away from someone, such
+ * as a reset or a deactivation (docs/admin-api.md §12, 7). Shown with ConfirmDialog.
+ */
+export interface Confirmation {
+  title: string;
+  body: ReactNode;
+  confirmLabel: string;
+  action: () => Promise<void>;
+}
+
+/** Asks before a change that deserves it (docs/admin-api.md §6 `confirm`, §12, 7). */
 export function ConfirmDialog({
   title,
   children,

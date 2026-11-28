@@ -13,20 +13,32 @@ import {
 import { problemFrom, type Problem } from "../api/problems";
 import type { AdminUser } from "../api/types";
 import { ProblemBanner } from "../components/ProblemBanner";
-import { Field, Loading, OnceSecret, Tag, Time } from "../components/widgets";
+import { ConfirmDialog, Field, Loading, OnceSecret, Tag, Time, type Confirmation } from "../components/widgets";
 import { useResource } from "../hooks/useResource";
 
 /**
  * Dashboard users (docs/admin-api.md §7, admin only). A supervisor belongs to
  * one site; an admin works across all of them. A new user, or a password
  * reset, gets a temporary password that is shown once: the person replaces it
- * at their first sign-in. You can't change your own role, site or active
- * flag, or reset your own password here; the server refuses, and the buttons
- * say so before you try.
+ * at their first sign-in. Reset password and Deactivate ask first, since each
+ * signs the person out at once (§12, 7); Reactivate and Edit don't.
+ *
+ * You can't change your own role, site or active flag, or reset your own
+ * password here; the server refuses, and the buttons say so before you try.
+ * You can edit your own name (§12, 8): `onOwnNameChange` passes the new one
+ * on, so the header shows it.
  *
  * `now` is only a seam for tests.
  */
-export function UsersPage({ user, now = () => new Date() }: { user: DashboardUser; now?: () => Date }) {
+export function UsersPage({
+  user,
+  now = () => new Date(),
+  onOwnNameChange,
+}: {
+  user: DashboardUser;
+  now?: () => Date;
+  onOwnNameChange?: (displayName: string) => void;
+}) {
   const users = useResource(getUsers, []);
   const sites = useResource(getSites, []);
   const siteName = (key: string | null) => (key ? (sites.data?.find((s) => s.key === key)?.display_name ?? key) : "All sites");
@@ -35,6 +47,7 @@ export function UsersPage({ user, now = () => new Date() }: { user: DashboardUse
   const [secret, setSecret] = useState<{ title: string; label: string; secret: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ id: number; name: string; role: Role; site: string } | null>(null);
+  const [confirming, setConfirming] = useState<Confirmation | null>(null);
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -99,6 +112,25 @@ export function UsersPage({ user, now = () => new Date() }: { user: DashboardUse
       {users.problem && <ProblemBanner problem={users.problem} />}
       {message && <ProblemBanner problem={message} />}
       {secret && <OnceSecret title={secret.title} label={secret.label} secret={secret.secret} onDone={() => setSecret(null)} />}
+      {confirming && (
+        <ConfirmDialog
+          title={confirming.title}
+          confirmLabel={confirming.confirmLabel}
+          busy={busy}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() =>
+            void run(async () => {
+              try {
+                await confirming.action();
+              } finally {
+                setConfirming(null);
+              }
+            })
+          }
+        >
+          {confirming.body}
+        </ConfirmDialog>
+      )}
       <Loading loading={users.loading} hasData={!!users.data} />
 
       {users.data && (
@@ -124,25 +156,35 @@ export function UsersPage({ user, now = () => new Date() }: { user: DashboardUse
                       onSubmit={(e) => {
                         e.preventDefault();
                         void run(async () => {
-                          replace(
-                            (
-                              await updateUser(u.id, {
-                                display_name: editing.name.trim(),
-                                role: editing.role,
-                                site: editing.role === "admin" ? null : editing.site,
-                              })
-                            ).user,
-                          );
+                          // Your own row sends only the name: the server refuses your own role and site (§7).
+                          const updated = (
+                            await updateUser(
+                              u.id,
+                              isMe(u)
+                                ? { display_name: editing.name.trim() }
+                                : {
+                                    display_name: editing.name.trim(),
+                                    role: editing.role,
+                                    site: editing.role === "admin" ? null : editing.site,
+                                  },
+                            )
+                          ).user;
+                          replace(updated);
+                          if (isMe(u)) onOwnNameChange?.(updated.display_name);
                           setEditing(null);
                         });
                       }}
                     >
                       <input aria-label={`Name for ${u.email}`} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} autoFocus />
-                      <select aria-label={`Role for ${u.email}`} value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value as Role })}>
-                        <option value="supervisor">Supervisor</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                      {editing.role === "supervisor" && (
+                      {isMe(u) ? (
+                        <small className="muted">You can&apos;t change your own role or site.</small>
+                      ) : (
+                        <select aria-label={`Role for ${u.email}`} value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value as Role })}>
+                          <option value="supervisor">Supervisor</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      )}
+                      {!isMe(u) && editing.role === "supervisor" && (
                         <select aria-label={`Site for ${u.email}`} value={editing.site} onChange={(e) => setEditing({ ...editing, site: e.target.value })}>
                           <option value="">Choose a site</option>
                           {(sites.data ?? []).filter((s) => s.is_active || s.key === u.site).map((s) => (
@@ -184,10 +226,20 @@ export function UsersPage({ user, now = () => new Date() }: { user: DashboardUse
                     disabled={busy || isMe(u)}
                     title={isMe(u) ? "Use “Change password” at the top of the page to change your own." : undefined}
                     onClick={() =>
-                      void run(async () => {
-                        const { temporary_password } = await resetUserPassword(u.id);
-                        showPassword(u, temporary_password, `New password for ${u.display_name}`);
-                        users.reload();
+                      setConfirming({
+                        title: `Reset ${u.display_name}'s password?`,
+                        body: (
+                          <p>
+                            Their current password stops working and they&apos;re signed out of the dashboard. You&apos;ll get a temporary password to hand
+                            over to {u.display_name} ({u.email}).
+                          </p>
+                        ),
+                        confirmLabel: "Reset password",
+                        action: async () => {
+                          const { temporary_password } = await resetUserPassword(u.id);
+                          showPassword(u, temporary_password, `New password for ${u.display_name}`);
+                          users.reload();
+                        },
                       })
                     }
                   >
@@ -197,8 +249,7 @@ export function UsersPage({ user, now = () => new Date() }: { user: DashboardUse
                     type="button"
                     className="secondary"
                     aria-label={`Edit ${u.email}`}
-                    disabled={busy || isMe(u)}
-                    title={isMe(u) ? "You can't change your own role or site." : undefined}
+                    disabled={busy}
                     onClick={() => setEditing({ id: u.id, name: u.display_name, role: u.role, site: u.site ?? "" })}
                   >
                     Edit
@@ -209,7 +260,24 @@ export function UsersPage({ user, now = () => new Date() }: { user: DashboardUse
                     aria-label={`${u.is_active ? "Deactivate" : "Reactivate"} ${u.email}`}
                     disabled={busy || isMe(u)}
                     title={isMe(u) ? "You can't deactivate yourself." : undefined}
-                    onClick={() => void run(async () => replace((await updateUser(u.id, { is_active: !u.is_active })).user))}
+                    onClick={() => {
+                      const toggle = async () => replace((await updateUser(u.id, { is_active: !u.is_active })).user);
+                      if (!u.is_active) {
+                        void run(toggle); // Reactivate takes nothing away: no question (§12, 7)
+                        return;
+                      }
+                      setConfirming({
+                        title: `Deactivate ${u.display_name}?`,
+                        body: (
+                          <p>
+                            {u.display_name} ({u.email}) is signed out of the dashboard at once and can&apos;t sign in again until an admin reactivates
+                            them.
+                          </p>
+                        ),
+                        confirmLabel: "Deactivate",
+                        action: toggle,
+                      });
+                    }}
                   >
                     {u.is_active ? "Deactivate" : "Reactivate"}
                   </button>

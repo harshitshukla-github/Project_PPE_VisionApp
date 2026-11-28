@@ -138,6 +138,20 @@ function seedChecks(now: Date, jobs: Job[], workers: Worker[], items: Item[]): C
 
 const req = (item: string, mode: Requirement["mode"] = "required"): Requirement => ({ item, mode });
 
+/**
+ * A job's equipment head to toe, in the items' order, as the server keeps it
+ * (docs/admin-api.md §5, decision 9 in §12): every save sorts the list,
+ * whatever order it was sent in, and the seed is read the same way. An item
+ * not in `items` goes last, as on the server.
+ */
+export function headToToe(requirements: Requirement[], items: Item[]): Requirement[] {
+  const rank = (key: string) => {
+    const index = items.findIndex((item) => item.key === key);
+    return index === -1 ? items.length : index;
+  };
+  return [...requirements].sort((a, b) => rank(a.item) - rank(b.item));
+}
+
 const WORKER_NAMES = [
   "Asha Verma", "Ravi Kumar", "Meera Iyer", "Sanjay Patil", "Divya Nair", "Imran Shaikh",
   "Kavita Joshi", "Arjun Rao", "Nisha Gupta", "Vikram Singh", "Pooja Desai", "Rahul Mehta",
@@ -167,13 +181,16 @@ export function seedState(now: Date = new Date()): MockState {
     { key: "boots", display_name: "Boots", detectable: true, detector_ap50: 0.598 },
   ];
 
+  // Written as in configs/job_matrix.yaml (seed.test.ts compares them), then put head to toe as the
+  // server seeds them (src/db/matrix.py `seed_from_yaml`).
+  const sorted = (requirements: Requirement[]) => headToToe(requirements, items);
   const jobRows: Array<[string, string, number, Requirement[]]> = [
-    ["general_labor", "General labor", 2, [req("hardhat"), req("safety_vest"), req("boots")]],
-    ["welder", "Welder", 4, [req("hardhat"), req("safety_vest"), req("goggles"), req("gloves"), req("boots"), req("face_shield", "pending")]],
-    ["electrician", "Electrician", 1, [req("hardhat"), req("safety_vest"), req("gloves"), req("goggles"), req("boots")]],
-    ["height_work", "Height work", 3, [req("hardhat"), req("safety_vest"), req("boots"), req("harness", "pending")]],
-    ["demolition", "Demolition", 1, [req("hardhat"), req("safety_vest"), req("goggles"), req("mask"), req("gloves"), req("boots"), req("ear_protection", "pending")]],
-    ["painter", "Painter", 2, [req("hardhat"), req("safety_vest"), req("mask"), req("goggles")]],
+    ["general_labor", "General labor", 2, sorted([req("hardhat"), req("safety_vest"), req("boots")])],
+    ["welder", "Welder", 4, sorted([req("hardhat"), req("safety_vest"), req("goggles"), req("gloves"), req("boots"), req("face_shield", "pending")])],
+    ["electrician", "Electrician", 1, sorted([req("hardhat"), req("safety_vest"), req("gloves"), req("goggles"), req("boots")])],
+    ["height_work", "Height work", 3, sorted([req("hardhat"), req("safety_vest"), req("boots"), req("harness", "pending")])],
+    ["demolition", "Demolition", 1, sorted([req("hardhat"), req("safety_vest"), req("goggles"), req("mask"), req("gloves"), req("boots"), req("ear_protection", "pending")])],
+    ["painter", "Painter", 2, sorted([req("hardhat"), req("safety_vest"), req("mask"), req("goggles")])],
   ];
   const jobs: Job[] = jobRows.map(([key, display_name, version, requirements], position) => ({
     key,
@@ -229,7 +246,7 @@ export function seedState(now: Date = new Date()): MockState {
     {
       id: 301, at: iso(5), actor: "second.admin@example.com", action: "job.requirements", target: "job:welder",
       site: null,
-      before: { requirements: [req("hardhat"), req("safety_vest"), req("goggles")] },
+      before: { requirements: sorted([req("hardhat"), req("safety_vest"), req("goggles")]) },
       after: { requirements: jobRows[1][3] }, ip: "192.168.29.20",
     },
     {

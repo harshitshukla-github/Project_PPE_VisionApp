@@ -14,7 +14,7 @@ import {
 import { problemFrom, type Problem } from "../api/problems";
 import type { Worker } from "../api/types";
 import { ProblemBanner } from "../components/ProblemBanner";
-import { ConfirmDialog, Field, Loading, OnceSecret, Pager, Tag, Time } from "../components/widgets";
+import { ConfirmDialog, Field, Loading, OnceSecret, Pager, Tag, Time, type Confirmation } from "../components/widgets";
 import { usePages, useResource } from "../hooks/useResource";
 
 const PAGE_SIZE = 25;
@@ -63,7 +63,9 @@ async function countStoredPhotos(workerId: string): Promise<number> {
  * Workers (docs/admin-api.md §8). An admin sees every site; a supervisor
  * sees, adds and manages only their own site's workers. A worker's one-time
  * PIN is shown once, when they are added or their PIN is reset, and the
- * worker replaces it at their first sign-in.
+ * worker replaces it at their first sign-in. Reset PIN and Deactivate ask
+ * first, since each signs the worker out of the app at once (§12, 7);
+ * Reactivate and Edit don't.
  *
  * `now` is only a seam for tests: it decides which "locked until" times are
  * still in the future.
@@ -95,6 +97,8 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
   const [editing, setEditing] = useState<{ id: string; name: string; site: string } | null>(null);
   // Deleting a worker's photos (admin, checks-api §4.4): counted first, then confirmed.
   const [photoDelete, setPhotoDelete] = useState<{ worker: Worker; count: number } | null>(null);
+  // Reset PIN and Deactivate, waiting for "yes" (§12, 7).
+  const [confirming, setConfirming] = useState<Confirmation | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
   // The add-a-worker form.
@@ -206,6 +210,25 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
           <p>
             <strong>It can&apos;t be undone.</strong>
           </p>
+        </ConfirmDialog>
+      )}
+      {confirming && (
+        <ConfirmDialog
+          title={confirming.title}
+          confirmLabel={confirming.confirmLabel}
+          busy={busy}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() =>
+            void run(async () => {
+              try {
+                await confirming.action();
+              } finally {
+                setConfirming(null);
+              }
+            })
+          }
+        >
+          {confirming.body}
         </ConfirmDialog>
       )}
 
@@ -334,10 +357,20 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
                       aria-label={`Reset PIN for ${w.worker_id}`}
                       disabled={busy}
                       onClick={() =>
-                        void run(async () => {
-                          const { one_time_pin } = await resetWorkerPin(w.worker_id);
-                          showPin(w, one_time_pin, `New PIN for ${w.display_name}`);
-                          list.reload();
+                        setConfirming({
+                          title: `Reset ${w.display_name}'s PIN?`,
+                          body: (
+                            <p>
+                              Their current PIN stops working and they&apos;re signed out of the app. You&apos;ll get a one-time PIN to hand over to{" "}
+                              {w.display_name} ({w.worker_id}).
+                            </p>
+                          ),
+                          confirmLabel: "Reset PIN",
+                          action: async () => {
+                            const { one_time_pin } = await resetWorkerPin(w.worker_id);
+                            showPin(w, one_time_pin, `New PIN for ${w.display_name}`);
+                            list.reload();
+                          },
                         })
                       }
                     >
@@ -351,7 +384,24 @@ export function WorkersPage({ user, now = () => new Date() }: { user: DashboardU
                       className="secondary"
                       aria-label={`${w.is_active ? "Deactivate" : "Reactivate"} ${w.worker_id}`}
                       disabled={busy}
-                      onClick={() => void run(async () => replaceWorker((await updateWorker(w.worker_id, { is_active: !w.is_active })).worker))}
+                      onClick={() => {
+                        const toggle = async () => replaceWorker((await updateWorker(w.worker_id, { is_active: !w.is_active })).worker);
+                        if (!w.is_active) {
+                          void run(toggle); // Reactivate takes nothing away: no question (§12, 7)
+                          return;
+                        }
+                        setConfirming({
+                          title: `Deactivate ${w.display_name}?`,
+                          body: (
+                            <p>
+                              {w.display_name} ({w.worker_id}) is signed out of the app at once and can&apos;t sign in again until they&apos;re
+                              reactivated. Their checks stay.
+                            </p>
+                          ),
+                          confirmLabel: "Deactivate",
+                          action: toggle,
+                        });
+                      }}
                     >
                       {w.is_active ? "Deactivate" : "Reactivate"}
                     </button>

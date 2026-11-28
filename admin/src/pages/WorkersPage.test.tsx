@@ -133,10 +133,18 @@ describe("WorkersPage as an admin", () => {
     });
   });
 
-  it("resets a PIN: shows a new one once and clears the lock", async () => {
+  it("resets a PIN after asking: shows a new one once and clears the lock (§12, 7)", async () => {
     const user = await open();
+    const name = worker("W-0004").display_name;
 
     await user.click(screen.getByRole("button", { name: "Reset PIN for W-0004" }));
+
+    const dialog = screen.getByRole("dialog", { name: `Reset ${name}'s PIN?` });
+    expect(dialog).toHaveTextContent(
+      `Their current PIN stops working and they're signed out of the app. You'll get a one-time PIN to hand over to ${name} (W-0004).`,
+    );
+    expect(worker("W-0004").locked_until).not.toBeNull(); // nothing happens before "yes"
+    await user.click(within(dialog).getByRole("button", { name: "Reset PIN" }));
 
     const panel = await screen.findByTestId("once-secret");
     expect(panel).toHaveTextContent("W-0004");
@@ -145,15 +153,38 @@ describe("WorkersPage as an admin", () => {
     await waitFor(() => expect(within(screen.getByRole("row", { name: /W-0004/ })).queryByText(/Locked until/)).toBeNull());
   });
 
-  it("deactivates and reactivates a worker", async () => {
+  it("deactivates a worker after asking; reactivating doesn't ask (§12, 7)", async () => {
     const user = await open();
 
     await user.click(screen.getByRole("button", { name: "Deactivate W-0001" }));
+    const dialog = screen.getByRole("dialog", { name: "Deactivate Asha Verma?" });
+    expect(dialog).toHaveTextContent(
+      "Asha Verma (W-0001) is signed out of the app at once and can't sign in again until they're reactivated. Their checks stay.",
+    );
+    expect(worker("W-0001").is_active).toBe(true); // nothing happens before "yes"
+    await user.click(within(dialog).getByRole("button", { name: "Deactivate" }));
     expect(await screen.findByRole("button", { name: "Reactivate W-0001" })).toBeInTheDocument();
     expect(worker("W-0001").is_active).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "Reactivate W-0001" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(await screen.findByRole("button", { name: "Deactivate W-0001" })).toBeInTheDocument();
+    expect(worker("W-0001").is_active).toBe(true);
+  });
+
+  it("cancelling a PIN reset or a deactivation changes nothing", async () => {
+    const user = await open();
+    const lockedUntil = worker("W-0004").locked_until;
+
+    await user.click(screen.getByRole("button", { name: "Reset PIN for W-0004" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Deactivate W-0001" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByTestId("once-secret")).toBeNull();
+    expect(worker("W-0004").locked_until).toBe(lockedUntil);
+    expect(worker("W-0001").is_active).toBe(true);
   });
 
   it("renames a worker and moves them to another site", async () => {
@@ -202,6 +233,7 @@ describe("WorkersPage as a supervisor", () => {
     const user = await open(SUPERVISOR_B);
 
     await user.click(screen.getByRole("button", { name: "Reset PIN for W-0004" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Reset PIN" }));
 
     expect(await screen.findByTestId("once-secret")).toBeInTheDocument();
   });

@@ -381,6 +381,20 @@ describe("the signed-in dashboard", () => {
     expect(navLabels(nav)).toEqual(["Matrix", "Checks", "Jobs", "Workers", "Sites", "Users", "Settings", "Audit log"]);
   });
 
+  it("shows your new name in the header once you rename yourself on Users (docs/admin-api.md §12, 8)", async () => {
+    openAs(ADMIN_SESSION, "#/users");
+    expect(await screen.findByTestId("whoami")).toHaveTextContent("Test Admin · admin");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: `Edit ${ADMIN_SESSION.user.email}` }));
+    const name = screen.getByLabelText(`Name for ${ADMIN_SESSION.user.email}`);
+    await user.clear(name);
+    await user.type(name, "Harshit Shukla");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.getByTestId("whoami")).toHaveTextContent("Harshit Shukla · admin"));
+  });
+
   it("gives a supervisor the matrix, the checks and the workers", async () => {
     openAs(SUPERVISOR_SESSION);
 

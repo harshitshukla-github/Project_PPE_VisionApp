@@ -29,7 +29,7 @@ import type {
   Warning,
   Worker,
 } from "../api/types";
-import { seedState, type MockState } from "./seed";
+import { headToToe, seedState, type MockState } from "./seed";
 
 export interface MockOptions {
   /** Who is signed in; the mock enforces what that user may do. */
@@ -346,11 +346,11 @@ export function createMockBackend(options: MockOptions): MockBackend {
       return fail(422, "invalid", "A job needs a name.", { field: "display_name" });
     }
     if (readJob(key)) return fail(409, "already_exists", `The job key "${key}" is taken.`, { field: "key" });
-    const bad = checkRequirements(body.requirements);
+    const bad = checkRequirements(body.requirements); // before sorting: errors name entries as sent
     if (bad) return bad;
     const job: Job = {
       key, display_name: body.display_name.trim(), position: state.jobs.length, is_active: true, version: 1,
-      requirements: structuredClone(body.requirements as Requirement[]), updated_at: stamp(),
+      requirements: headToToe(structuredClone(body.requirements as Requirement[]), state.items), updated_at: stamp(),
     };
     state.jobs.push(job);
     record(user, "job.create", `job:${key}`, null, null, {
@@ -391,9 +391,10 @@ export function createMockBackend(options: MockOptions): MockBackend {
     const job = readJob(params[0]);
     if (!job) return notFound("job");
     if (body.version !== job.version) return versionConflict(job);
-    const bad = checkRequirements(body.requirements);
+    const bad = checkRequirements(body.requirements); // before sorting: errors name entries as sent
     if (bad) return bad;
-    const requirements = structuredClone(body.requirements as Requirement[]);
+    // Head to toe first, as on the server: the same items in another order are no change at all.
+    const requirements = headToToe(structuredClone(body.requirements as Requirement[]), state.items);
     if (JSON.stringify(requirements) !== JSON.stringify(job.requirements)) {
       record(user, "job.requirements", `job:${job.key}`, null, { requirements: job.requirements }, { requirements });
       job.requirements = requirements;

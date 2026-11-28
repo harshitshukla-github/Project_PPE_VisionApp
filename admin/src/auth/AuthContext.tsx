@@ -44,6 +44,8 @@ interface AuthApi {
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   /** Ask the server who is signed in again, after it didn't answer. */
   retry: () => void;
+  /** The signed-in user saved a new name for themselves (Users page): show it from now on. */
+  renamed: (displayName: string) => void;
 }
 
 const AuthContext = createContext<AuthApi | undefined>(undefined);
@@ -143,8 +145,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  function renamed(displayName: string) {
+    setAuth((current) =>
+      current.kind === "signedIn" ? { kind: "signedIn", user: { ...current.user, display_name: displayName } } : current,
+    );
+  }
+
   return (
-    <AuthContext.Provider value={{ auth, signIn, signOut, changePassword, retry }}>
+    <AuthContext.Provider value={{ auth, signIn, signOut, changePassword, retry, renamed }}>
       {children}
     </AuthContext.Provider>
   );

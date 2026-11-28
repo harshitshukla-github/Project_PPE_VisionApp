@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 
 import type { DashboardUser, Role } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { AuditPage } from "./AuditPage";
 import { CheckPage } from "./CheckPage";
 import { ChecksPage } from "./ChecksPage";
@@ -35,10 +36,16 @@ export const PAGES: PageDef[] = [
   { path: "/jobs", label: "Jobs", roles: ADMIN_ONLY, render: () => <JobsPage /> },
   { path: "/workers", label: "Workers", roles: BOTH, render: (user) => <WorkersPage user={user} /> },
   { path: "/sites", label: "Sites", roles: ADMIN_ONLY, render: () => <SitesPage /> },
-  { path: "/users", label: "Users", roles: ADMIN_ONLY, render: (user) => <UsersPage user={user} /> },
+  { path: "/users", label: "Users", roles: ADMIN_ONLY, render: (user) => <UsersPageWithSession user={user} /> },
   { path: "/settings", label: "Settings", roles: ADMIN_ONLY, render: () => <SettingsPage /> },
   { path: "/audit", label: "Audit log", roles: ADMIN_ONLY, render: () => <AuditPage /> },
 ];
+
+/** The Users page, telling the session when you rename yourself, so the header shows the new name. */
+function UsersPageWithSession({ user }: { user: DashboardUser }) {
+  const { renamed } = useAuth();
+  return <UsersPage user={user} onOwnNameChange={renamed} />;
+}
 
 /** The page an address belongs to, and what follows its path: `/checks/1006` → Checks, `1006`. */
 export function pageFor(path: string): { page: PageDef; rest: string } | undefined {

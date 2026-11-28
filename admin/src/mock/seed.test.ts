@@ -1,8 +1,10 @@
 /**
  * The stand-in's jobs are copied by hand from configs/job_matrix.yaml, the
  * file that seeds a new database. They drifted once (three of six), so this
- * reads the yaml and compares: the same jobs in the same order, the same
- * required equipment in the same order, then the pending items.
+ * reads the yaml and compares: the same jobs in the same order, and the same
+ * equipment, head to toe as the server seeds it (docs/admin-api.md §5,
+ * decision 9 in §12). The head-to-toe order is read from the server's own
+ * catalogue (`ITEMS` in src/db/matrix.py), so the stand-in's can't drift either.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -16,15 +18,34 @@ import { seedState } from "./seed";
  * for `npm test` and CI) by looking upwards. `import.meta.url` isn't a file
  * URL under the jsdom environment, so it can't be used for this.
  */
-function findMatrixFile(): string {
+function findRepoFile(...parts: string[]): string {
   for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const candidate = join(dir, "configs", "job_matrix.yaml");
+    const candidate = join(dir, ...parts);
     if (existsSync(candidate)) return candidate;
-    if (dirname(dir) === dir) throw new Error(`configs/job_matrix.yaml not found above ${process.cwd()}`);
+    if (dirname(dir) === dir) throw new Error(`${parts.join("/")} not found above ${process.cwd()}`);
   }
 }
 
-const MATRIX_FILE = findMatrixFile();
+const MATRIX_FILE = findRepoFile("configs", "job_matrix.yaml");
+
+/**
+ * The item keys of `ITEMS` in src/db/matrix.py, in order: one `("key", "Name", True),`
+ * per line between `ITEMS ... = (` and `)`. Anything else in there fails the test.
+ */
+function readItemOrder(text: string): string[] {
+  const block = /^ITEMS\b[^\n]*= \(\r?\n([\s\S]*?)^\)/m.exec(text);
+  if (!block) throw new Error("ITEMS not found in src/db/matrix.py. Update readItemOrder.");
+  return block[1]
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      const item = /^ {4}\("([a-z_]+)", "[^"]*", (True|False)\),$/.exec(line.trimEnd());
+      if (!item) throw new Error(`src/db/matrix.py ITEMS has a line this test can't read: "${line}". Update readItemOrder.`);
+      return item[1];
+    });
+}
+
+const ITEM_ORDER = readItemOrder(readFileSync(findRepoFile("src", "db", "matrix.py"), "utf-8"));
 
 interface YamlJob {
   required: string[];
@@ -85,13 +106,19 @@ describe("the stand-in's sample jobs match configs/job_matrix.yaml", () => {
     expect(seed.jobs.map((j) => j.key)).toEqual([...yaml.keys()]);
   });
 
+  it("lists the server's items, in the server's head-to-toe order", () => {
+    expect(ITEM_ORDER.length).toBeGreaterThanOrEqual(9);
+    expect(seed.items.map((i) => i.key)).toEqual(ITEM_ORDER);
+  });
+
   it.each([...readJobMatrix(readFileSync(MATRIX_FILE, "utf-8")).keys()])(
-    "%s: the same required items in the same order, then the same pending ones",
+    "%s: the same required and pending items, head to toe as the server seeds them",
     (key) => {
+      // seed_from_yaml: required then pending, sorted together by the items' order.
       const expected = [
         ...yaml.get(key)!.required.map((item) => ({ item, mode: "required" })),
         ...yaml.get(key)!.pending.map((item) => ({ item, mode: "pending" })),
-      ];
+      ].sort((a, b) => ITEM_ORDER.indexOf(a.item) - ITEM_ORDER.indexOf(b.item));
       expect(seed.jobs.find((j) => j.key === key)?.requirements).toEqual(expected);
     },
   );

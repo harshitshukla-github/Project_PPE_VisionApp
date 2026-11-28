@@ -33,13 +33,49 @@ describe("UsersPage", () => {
     expect(within(row("second.admin@example.com")).getByText("All sites")).toBeInTheDocument();
   });
 
-  it("won't let you act on your own account, and says why", async () => {
+  it("won't let you reset or deactivate your own account, and says why; Edit stays open (§12, 8)", async () => {
     await open();
 
-    for (const name of [`Reset password for ${ADMIN.email}`, `Edit ${ADMIN.email}`, `Deactivate ${ADMIN.email}`]) {
+    for (const name of [`Reset password for ${ADMIN.email}`, `Deactivate ${ADMIN.email}`]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
     expect(screen.getByRole("button", { name: `Deactivate ${ADMIN.email}` })).toHaveAttribute("title", "You can't deactivate yourself.");
+    expect(screen.getByRole("button", { name: `Edit ${ADMIN.email}` })).toBeEnabled();
+  });
+
+  it("edits your own name: only the name, and the header is told (§12, 8)", async () => {
+    const renamed: string[] = [];
+    render(<UsersPage user={ADMIN} onOwnNameChange={(name) => renamed.push(name)} />);
+    await screen.findByText("Site Supervisor B");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: `Edit ${ADMIN.email}` }));
+    expect(screen.queryByLabelText(`Role for ${ADMIN.email}`)).toBeNull();
+    expect(screen.queryByLabelText(`Site for ${ADMIN.email}`)).toBeNull();
+    expect(screen.getByText("You can't change your own role or site.")).toBeInTheDocument();
+
+    const name = screen.getByLabelText(`Name for ${ADMIN.email}`);
+    await user.clear(name);
+    await user.type(name, "Harshit Shukla");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await within(row(ADMIN.email)).findByText(/Harshit Shukla/)).toBeInTheDocument();
+    expect(byEmail(ADMIN.email)).toMatchObject({ display_name: "Harshit Shukla", role: "admin", site: null });
+    expect(renamed).toEqual(["Harshit Shukla"]);
+  });
+
+  it("someone else's name change isn't passed to the header", async () => {
+    const renamed: string[] = [];
+    render(<UsersPage user={ADMIN} onOwnNameChange={(name) => renamed.push(name)} />);
+    await screen.findByText("Site Supervisor B");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Edit supervisor.b@example.com" }));
+    await user.type(screen.getByLabelText("Name for supervisor.b@example.com"), " Jr");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Site Supervisor B Jr")).toBeInTheDocument();
+    expect(renamed).toEqual([]);
   });
 
   describe("adding a user", () => {
@@ -88,25 +124,56 @@ describe("UsersPage", () => {
     });
   });
 
-  it("resets another user's password and shows the temporary one once", async () => {
+  it("asks before resetting another user's password, then shows the temporary one once (§12, 7)", async () => {
     const user = await open();
+    const auditBefore = backend.state.audit.length;
 
     await user.click(screen.getByRole("button", { name: "Reset password for supervisor.c@example.com" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Reset Site Supervisor C's password?" });
+    expect(dialog).toHaveTextContent("Their current password stops working and they're signed out of the dashboard.");
+    expect(dialog).toHaveTextContent("Site Supervisor C (supervisor.c@example.com)");
+    expect(backend.state.audit.length).toBe(auditBefore); // nothing happens before "yes"
+
+    await user.click(within(dialog).getByRole("button", { name: "Reset password" }));
 
     const panel = await screen.findByTestId("once-secret");
     expect(panel).toHaveTextContent("Site Supervisor C");
     expect(byEmail("supervisor.c@example.com").must_change_password).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("deactivates and reactivates another user", async () => {
+  it("cancelling a reset or a deactivation changes nothing", async () => {
+    const user = await open();
+    const auditBefore = backend.state.audit.length;
+
+    await user.click(screen.getByRole("button", { name: "Reset password for supervisor.c@example.com" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Deactivate supervisor.c@example.com" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByTestId("once-secret")).toBeNull();
+    expect(byEmail("supervisor.c@example.com").is_active).toBe(true);
+    expect(backend.state.audit.length).toBe(auditBefore);
+  });
+
+  it("deactivates another user after asking; reactivating doesn't ask (§12, 7)", async () => {
     const user = await open();
 
     await user.click(screen.getByRole("button", { name: "Deactivate supervisor.c@example.com" }));
+    const dialog = screen.getByRole("dialog", { name: "Deactivate Site Supervisor C?" });
+    expect(dialog).toHaveTextContent(
+      "Site Supervisor C (supervisor.c@example.com) is signed out of the dashboard at once and can't sign in again until an admin reactivates them.",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Deactivate" }));
     expect(await screen.findByRole("button", { name: "Reactivate supervisor.c@example.com" })).toBeInTheDocument();
     expect(byEmail("supervisor.c@example.com").is_active).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "Reactivate supervisor.c@example.com" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(await screen.findByRole("button", { name: "Deactivate supervisor.c@example.com" })).toBeInTheDocument();
+    expect(byEmail("supervisor.c@example.com").is_active).toBe(true);
   });
 
   it("explains 'no active admin would remain' when the server refuses", async () => {
@@ -114,9 +181,11 @@ describe("UsersPage", () => {
     byEmail(ADMIN.email).is_active = false; // you were deactivated a moment ago; your session is still open
 
     await user.click(screen.getByRole("button", { name: "Deactivate second.admin@example.com" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Deactivate" }));
 
     expect(await screen.findByText("That would leave no active admin.")).toBeInTheDocument();
     expect(byEmail("second.admin@example.com").is_active).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("edits a supervisor's name and moves them to another site", async () => {

@@ -175,6 +175,48 @@ describe("items and jobs (§4, §5)", () => {
     expect((await call("POST", "/jobs", { key: "welder", display_name: "x", requirements: [{ item: "hardhat", mode: "required" }] })).body.code).toBe("already_exists");
   });
 
+  describe("equipment head to toe, as the server keeps it (§5, decision 9 in §12)", () => {
+    const items = (list: Array<{ item: string }>) => list.map((r) => r.item);
+
+    it("a job ticked boots first is saved hardhat first, in the job and in its audit entry", async () => {
+      const created = await call("POST", "/jobs", {
+        key: "rigger", display_name: "Rigger",
+        requirements: [{ item: "boots", mode: "required" }, { item: "harness", mode: "pending" }, { item: "hardhat", mode: "required" }],
+      });
+      expect(created.status).toBe(201);
+      expect(items(created.body.job.requirements)).toEqual(["hardhat", "harness", "boots"]);
+      const entry = backend.state.audit.find((e) => e.action === "job.create" && e.target === "job:rigger")!;
+      expect(items((entry.after as { requirements: Array<{ item: string }> }).requirements)).toEqual(["hardhat", "harness", "boots"]);
+    });
+
+    it("an item switched on takes its place, not the end", async () => {
+      const res = await call("PUT", "/jobs/general_labor/requirements", {
+        version: 2,
+        requirements: [...job("general_labor").requirements, { item: "goggles", mode: "required" }],
+      });
+      expect(items(res.body.job.requirements)).toEqual(["hardhat", "goggles", "safety_vest", "boots"]);
+    });
+
+    it("the same items in another order are no change: same version, no audit entry", async () => {
+      const auditBefore = backend.state.audit.length;
+      const res = await call("PUT", "/jobs/general_labor/requirements", {
+        version: 2, requirements: [...job("general_labor").requirements].reverse(),
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.job.version).toBe(2);
+      expect(items(res.body.job.requirements)).toEqual(["hardhat", "safety_vest", "boots"]);
+      expect(backend.state.audit.length).toBe(auditBefore);
+    });
+
+    it("a 422 names the entry by its place in the list as sent, not as sorted", async () => {
+      const res = await call("PUT", "/jobs/painter/requirements", {
+        version: 2,
+        requirements: [{ item: "boots", mode: "required" }, { item: "hardhat", mode: "required" }, { item: "boots", mode: "pending" }],
+      });
+      expect(res.body).toMatchObject({ code: "invalid", field: "requirements[2].item" });
+    });
+  });
+
   it("refuses to deactivate the last active job, and a deactivated job stays in the list", async () => {
     for (const j of backend.state.jobs.slice(1)) {
       expect((await call("PATCH", `/jobs/${j.key}`, { version: j.version, is_active: false })).status).toBe(200);
