@@ -618,6 +618,29 @@ class TestCli:
         entry = db.scalar(select(AuditEntry).where(AuditEntry.action == "user.reset_password"))
         assert (entry.actor, entry.target, entry.after) == ("cli", f"user:{ADMIN_EMAIL}", None)
 
+    def test_reset_password_shows_the_password_whatever_brackets_the_name_has(
+        self, client: TestClient, db: Session
+    ) -> None:
+        """Rich reads [brackets] as markup; unescaped, "[/contractor]" failed after the reset."""
+        service.create_user(db, ADMIN_EMAIL, "R. Kumar [/contractor]", Role.ADMIN, ADMIN_PASSWORD)
+        result = self.runner.invoke(cli.app, ["auth", "reset-password", "--email", ADMIN_EMAIL])
+        assert result.exit_code == 0, result.output
+        assert "(R. Kumar [/contractor])" in result.output
+        temporary = re.search(r"Temporary password: ([A-Za-z0-9_-]+)", result.output).group(1)
+        assert _user_login(client, ADMIN_EMAIL, temporary).status_code == 200
+
+    def test_pin_panels_print_a_name_with_brackets_as_written(self, db_engine) -> None:
+        result = self.runner.invoke(cli.app, ["auth", "create-worker", "--worker-id", "W-8",
+                                              "--name", "Asha [site lead]"])
+        assert result.exit_code == 0, result.output
+        assert "(Asha [site lead])" in result.output and "One-time PIN" in result.output
+
+    def test_an_error_repeating_what_was_typed_is_printed_as_written(self, db_engine) -> None:
+        result = self.runner.invoke(cli.app, ["auth", "create-worker", "--worker-id", "[/x]",
+                                              "--name", "Someone"])
+        assert result.exit_code == 1
+        assert "is not a valid worker ID" in result.output
+
     def test_reset_password_for_an_unknown_email_is_a_clean_error(self, db_engine,
                                                                   admin: User) -> None:
         result = self.runner.invoke(cli.app,
