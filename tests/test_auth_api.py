@@ -6,6 +6,7 @@ TEST_DATABASE_URL is not set; CI always sets it.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from datetime import timedelta
 
@@ -25,7 +26,7 @@ from src.auth.crypto import token_hash
 from src.auth.deps import require_user
 from src.auth.errors import AuthError, auth_error_handler
 from src.auth.ratelimit import ip_limiter
-from src.db.models import AuthSession, Role, Site, User, Worker
+from src.db.models import AuditEntry, AuthSession, Role, Site, User, Worker
 from src.settings import settings
 from tests.conftest import TEST_DB_URL
 
@@ -590,6 +591,77 @@ class TestCli:
         assert worker.locked_until is None and worker.must_change_pin is True
         assert client.get("/api/v1/auth/worker/me",
                           headers=_bearer(worker_token)).status_code == 401
+
+    def test_reset_password_lets_the_only_admin_back_in(
+        self, client: TestClient, csrf: str, db: Session
+    ) -> None:
+        """Issue #37: locked out, and no other admin to reset it from the dashboard."""
+        db.execute(update(User).values(failed_attempts=5,
+                                       locked_until=service.utcnow() + timedelta(minutes=15)))
+        db.commit()
+        result = self.runner.invoke(cli.app,
+                                    ["auth", "reset-password", "--email", " Admin@Example.COM "])
+        assert result.exit_code == 0, result.output
+        temporary = re.search(r"Temporary password: ([A-Za-z0-9_-]+)", result.output).group(1)
+
+        db.expire_all()
+        user = db.scalar(select(User))
+        assert user.must_change_password is True
+        assert (user.failed_attempts, user.locked_until) == (0, None)
+        assert temporary not in user.password_hash
+        assert client.get("/api/v1/auth/me").status_code == 401  # signed out everywhere
+        assert _user_login(client, ADMIN_EMAIL, ADMIN_PASSWORD).status_code == 401
+        signed_in = _user_login(client, ADMIN_EMAIL, temporary)
+        assert signed_in.status_code == 200
+        assert client.get("/api/v1/auth/me").json()["user"]["must_change_password"] is True
+
+        entry = db.scalar(select(AuditEntry).where(AuditEntry.action == "user.reset_password"))
+        assert (entry.actor, entry.target, entry.after) == ("cli", f"user:{ADMIN_EMAIL}", None)
+
+    def test_reset_password_shows_the_password_whatever_brackets_the_name_has(
+        self, client: TestClient, db: Session
+    ) -> None:
+        """Rich reads [brackets] as markup; unescaped, "[/contractor]" failed after the reset."""
+        service.create_user(db, ADMIN_EMAIL, "R. Kumar [/contractor]", Role.ADMIN, ADMIN_PASSWORD)
+        result = self.runner.invoke(cli.app, ["auth", "reset-password", "--email", ADMIN_EMAIL])
+        assert result.exit_code == 0, result.output
+        assert "(R. Kumar [/contractor])" in result.output
+        temporary = re.search(r"Temporary password: ([A-Za-z0-9_-]+)", result.output).group(1)
+        assert _user_login(client, ADMIN_EMAIL, temporary).status_code == 200
+
+    def test_pin_panels_print_a_name_with_brackets_as_written(self, db_engine) -> None:
+        result = self.runner.invoke(cli.app, ["auth", "create-worker", "--worker-id", "W-8",
+                                              "--name", "Asha [site lead]"])
+        assert result.exit_code == 0, result.output
+        assert "(Asha [site lead])" in result.output and "One-time PIN" in result.output
+
+    def test_an_error_repeating_what_was_typed_is_printed_as_written(self, db_engine) -> None:
+        result = self.runner.invoke(cli.app, ["auth", "create-worker", "--worker-id", "[/x]",
+                                              "--name", "Someone"])
+        assert result.exit_code == 1
+        assert "is not a valid worker ID" in result.output
+
+    def test_reset_password_for_an_unknown_email_is_a_clean_error(self, db_engine,
+                                                                  admin: User) -> None:
+        result = self.runner.invoke(cli.app,
+                                    ["auth", "reset-password", "--email", "nobody@example.com"])
+        assert result.exit_code == 1
+        assert "No dashboard account for nobody@example.com." in result.output
+
+    def test_reset_password_leaves_a_deactivated_account_deactivated(
+        self, db_engine, db: Session
+    ) -> None:
+        sup = service.create_user(db, "sup@example.com", "Sup", Role.SUPERVISOR,
+                                  "a supervisor passphrase", site_id=_main_site(db))
+        sup.is_active = False
+        db.commit()
+        result = self.runner.invoke(cli.app,
+                                    ["auth", "reset-password", "--email", "sup@example.com"])
+        assert result.exit_code == 0, result.output
+        assert "Dashboard supervisor sup@example.com" in result.output
+        assert "This account is deactivated" in result.output
+        db.expire_all()
+        assert db.get(User, sup.id).is_active is False
 
     def test_create_admin_asks_for_the_password_twice(self, db_engine, db: Session) -> None:
         result = self.runner.invoke(

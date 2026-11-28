@@ -34,6 +34,7 @@ from typing import Optional
 import typer
 from loguru import logger
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -1061,7 +1062,8 @@ def _run_account_command(action):
         try:
             return action(db)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
+            # The message can repeat what was typed, so it is printed as plain text.
+            console.print(f"[red]{escape(str(exc))}[/red]")
             raise typer.Exit(code=1) from None
         except SQLAlchemyError as exc:
             console.print(
@@ -1072,9 +1074,11 @@ def _run_account_command(action):
 
 
 def _print_one_time_pin(worker_code: str, name: str, pin: str) -> None:
+    # Names are free text, and Rich reads [brackets] as markup: escaped, a name like
+    # "R. Kumar [/contractor]" prints as written instead of failing after the PIN is saved.
     console.print(
         Panel.fit(
-            f"Worker [bold]{worker_code}[/bold] ({name})\n"
+            f"Worker [bold]{escape(worker_code)}[/bold] ({escape(name)})\n"
             f"One-time PIN: [bold]{pin}[/bold]\n\n"
             "Hand this to the worker. They must choose their own PIN at first\n"
             "login. It is not stored anywhere and can't be shown again.",
@@ -1141,6 +1145,37 @@ def auth_reset_pin_cmd(
 
     worker, pin = _run_account_command(lambda db: reset_worker_pin(db, worker_id))
     _print_one_time_pin(worker.worker_code, worker.display_name, pin)
+
+
+@auth_app.command("reset-password")
+def auth_reset_password_cmd(
+    email: str = typer.Option(..., "--email", help="The dashboard account's email."),
+) -> None:
+    """
+    Issue a **temporary password** for a dashboard account, unlock it, and sign it
+    out everywhere.
+
+    The dashboard can only reset someone else's password, so this is how an admin
+    who has forgotten theirs gets back in, even the only admin.
+    """
+    from src.admin.users import reset_password_by_email
+
+    user, password = _run_account_command(lambda db: reset_password_by_email(db, email))
+    # Escaped for the same reason as in _print_one_time_pin: the reset is already saved, so a
+    # name Rich can't parse would lose the only copy of the temporary password.
+    email_shown, name_shown = escape(user.email), escape(user.display_name)
+    console.print(
+        Panel.fit(
+            f"Dashboard {user.role} [bold]{email_shown}[/bold] ({name_shown})\n"
+            f"Temporary password: [bold]{password}[/bold]\n\n"
+            "Hand this over. They must choose their own password when they next\n"
+            "sign in. It is not stored anywhere and can't be shown again.",
+            title="New password",
+        )
+    )
+    if not user.is_active:
+        console.print("[yellow]This account is deactivated: it can't sign in until an admin "
+                      "reactivates it.[/yellow]")
 
 
 # ---------------------------------------------------------------------------
