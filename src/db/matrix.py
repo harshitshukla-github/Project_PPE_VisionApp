@@ -33,6 +33,15 @@ ITEMS: tuple[tuple[str, str, bool], ...] = (
 ITEM_ORDER: dict[str, int] = {key: index for index, (key, _, _) in enumerate(ITEMS)}
 
 
+def item_rank(key: str) -> int:
+    """Where an item comes, head to toe. An item not in :data:`ITEMS` goes last.
+
+    A job's equipment is kept in this order whatever order it was entered in
+    (docs/admin-api.md §5), so the list the app shows reads head to toe.
+    """
+    return ITEM_ORDER.get(key, len(ITEM_ORDER))
+
+
 @dataclass(frozen=True)
 class SeedReport:
     """What :func:`seed_from_yaml` did."""
@@ -125,9 +134,11 @@ def seed_from_yaml(engine: Engine, yaml_path: Path) -> SeedReport:
             )
 
         for position, (key, req) in enumerate(matrix.items()):
-            ordered = [(item, RequirementMode.REQUIRED) for item in req.required] + [
-                (item, RequirementMode.PENDING) for item in req.pending
-            ]
+            ordered = sorted(
+                [(item, RequirementMode.REQUIRED) for item in req.required]
+                + [(item, RequirementMode.PENDING) for item in req.pending],
+                key=lambda pair: item_rank(pair[0]),
+            )
             session.add(
                 Job(
                     key=key,

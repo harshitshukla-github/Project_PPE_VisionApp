@@ -127,8 +127,16 @@ def matrix_source() -> str:
 def _load_yaml_matrix(path: Path) -> dict[str, JobRequirements]:
     if not path.exists():
         raise FileNotFoundError(f"Job PPE Matrix not found: {path}")
+    from src.db.matrix import item_rank  # noqa: PLC0415 — src.db.matrix imports this module
+
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    matrix = {job: JobRequirements(**req) for job, req in raw.get("jobs", {}).items()}
+    matrix: dict[str, JobRequirements] = {}
+    for job, req in raw.get("jobs", {}).items():
+        parsed = JobRequirements(**req)
+        # Head to toe, as the database keeps them (docs/admin-api.md §5).
+        parsed.required = sorted(parsed.required, key=item_rank)
+        parsed.pending = sorted(parsed.pending, key=item_rank)
+        matrix[job] = parsed
     logger.debug(f"Job PPE Matrix loaded from {path}: {sorted(matrix)}")
     return matrix
 

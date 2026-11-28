@@ -336,6 +336,38 @@ class TestJobs:
         assert again.json()["job"]["version"] == 1
         assert _audit(db, "job.requirements") == []
 
+    def test_a_new_job_reads_head_to_toe_whatever_order_it_was_ticked_in(
+        self, admin: Browser, db: Session
+    ) -> None:
+        """Decision 9 (§12): the boxes ticked boots first, the list still starts at the head."""
+        ticked = [{"item": "boots", "mode": "required"}, {"item": "face_shield", "mode": "pending"},
+                  {"item": "hardhat", "mode": "required"}]
+        head_to_toe = [ticked[2], ticked[1], ticked[0]]
+        job = admin.post("/jobs", {"key": "diver", "display_name": "Diver",
+                                   "requirements": ticked}).json()["job"]
+        assert job["requirements"] == head_to_toe
+        assert admin.client.get("/api/v1/jobs").json()["diver"] == {
+            "required": ["hardhat", "boots"], "pending": ["face_shield"]}
+        assert _audit(db, "job.create")[0].after["requirements"] == head_to_toe
+
+    def test_an_item_switched_on_takes_its_place_not_the_end(self, admin: Browser) -> None:
+        current = _job(admin, "painter")["requirements"]
+        assert [r["item"] for r in current] == ["hardhat", "goggles", "mask", "safety_vest"]
+        saved = admin.put("/jobs/painter/requirements", {"version": 1, "requirements": [
+            *current, {"item": "ear_protection", "mode": "pending"}]}).json()["job"]
+        assert [r["item"] for r in saved["requirements"]] == \
+            ["hardhat", "goggles", "ear_protection", "mask", "safety_vest"]
+        assert saved["version"] == 2
+
+    def test_the_same_items_in_another_order_change_nothing(self, admin: Browser,
+                                                             db: Session) -> None:
+        current = _job(admin, "painter")["requirements"]
+        again = admin.put("/jobs/painter/requirements",
+                          {"version": 1, "requirements": list(reversed(current))})
+        assert again.json()["job"]["version"] == 1
+        assert again.json()["job"]["requirements"] == current
+        assert _audit(db, "job.requirements") == []
+
     def test_gemini_off_is_warned_on_save(self, admin: Browser) -> None:
         admin.patch("/settings", {"gemini_verify": False})
         warnings = admin.put("/jobs/painter/requirements", {"version": 1, "requirements": [

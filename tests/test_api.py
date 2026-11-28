@@ -39,8 +39,9 @@ class TestHealthAndInfo:
         response = api_client.get("/api/v1/jobs")
         assert response.status_code == 200
         body = response.json()
+        # Head to toe (admin-api.md §5), though the YAML lists the vest before the goggles.
         assert body["welder"]["required"] == [
-            "hardhat", "safety_vest", "goggles", "gloves", "boots",
+            "hardhat", "goggles", "safety_vest", "gloves", "boots",
         ]
         assert "face_shield" in body["welder"]["pending"]
 
